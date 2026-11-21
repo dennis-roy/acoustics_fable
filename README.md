@@ -9,7 +9,7 @@ Work happens on branch `rev-2`.
 | Step | Work | State |
 |---|---|---|
 | 1 | Hardware design review (Phase 0) | approved 2026-11-21, revision B |
-| 2 | Pico firmware skeleton, CM5 receiver, link proof with synthetic data, simulator, first self-test | **written; logic tested on a laptop; Pico build not yet compiled; never run on a Pico or a CM5** |
+| 2 | Pico firmware skeleton, CM5 receiver, link proof with synthetic data, simulator, first self-test | **written; logic tested on a laptop and in CI; Pico build compiles in CI; never run on a Pico or a CM5** |
 | 3 to 11 | Microphone capture, storage, database, analysis, UI, I/O, reports, install | not started |
 
 **Nothing in this repository has been verified on hardware.** Each module's README says exactly what was run and where.
@@ -58,7 +58,7 @@ PASS 13   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)
 
 This is what closes step 2 (bench items 16 to 19 of the review).
 
-1. Get the firmware: open the latest `ci` run on GitHub for branch `rev-2`, download the `eol_pico-uf2` artifact and unzip it. Or build it (`firmware/README.md`). The firmware had not been compiled when this was written, so the first build may fail; paste the errors back.
+1. Get the firmware: open the latest `ci` run on GitHub for branch `rev-2`, download the `eol_pico-uf2` artifact and unzip it. Or build it (`firmware/README.md`). It compiles, but it has never run on a Pico, so the first power-up may not work; step 4 says what to paste back.
 2. Flash it: hold BOOTSEL on the Pico 2 W, plug it into a computer, copy `eol_pico.uf2` onto the drive that appears.
 3. Plug the Pico straight into the CM5 IO Board.
 4. On the CM5:

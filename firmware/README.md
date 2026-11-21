@@ -1,6 +1,6 @@
 # firmware: Pico 2 W front end
 
-**State: build-plan step 2 (skeleton). It has never run on a Pico, and the Pico build has not been compiled yet.** The logic is tested on a PC. The hardware layer (`main.c`, `usb_descriptors.c`) was written without a compiler for the Pico to hand, so expect to fix errors at the first build.
+**State: build-plan step 2 (skeleton). It compiles for the Pico 2 W in CI. It has never run on a Pico.** The logic is tested on a PC. The hardware layer (`main.c`, `usb_descriptors.c`) has only ever been compiled, so expect to fix things at first power-up.
 
 ## What it does in this step
 
@@ -22,11 +22,11 @@ The wire format is `../protocol/README.md`. The reasons behind the design are in
 | `src/core.c`, `core.h` | All behaviour: commands, stream, watchdog, outputs. No hardware calls | compiled for a PC and run through the system tests |
 | `src/proto.c`, `proto.h` | Frame format and CRC-32 | same |
 | `src/hal.h` | The five things the core needs from a board | |
-| `src/main.c` | Pico 2 W layer: clock, pins, USB pump, hardware watchdog | **not compiled yet** |
-| `src/usb_descriptors.c`, `tusb_config.h` | Two-serial-port USB device | **not compiled yet** |
+| `src/main.c` | Pico 2 W layer: clock, pins, USB pump, hardware watchdog | compiles in CI; **never run** |
+| `src/usb_descriptors.c`, `tusb_config.h` | Two-serial-port USB device | compiles in CI; **never run** |
 | `src/board.h` | Pin map | |
 | `host/core_host.c` | Runs `core.c` on a PC with two pseudo-terminals in place of USB | used by `scripts/selftest.sh` |
-| `CMakeLists.txt` | Pico build | not run yet; CI runs it at every push |
+| `CMakeLists.txt` | Pico build | CI runs it at every push |
 
 `core.c` is kept free of hardware so that the part with the logic in it can be tested without a Pico. `main.c` is deliberately thin.
 
@@ -36,7 +36,7 @@ None. This repository had no firmware before this step: its only file was a one-
 
 ## Build
 
-Easiest: every push builds it in CI (`.github/workflows/ci.yml`). Download `eol_pico.uf2` from the run's artifacts. CI has not run yet, because nothing has been pushed.
+Easiest: every push builds it in CI (`.github/workflows/ci.yml`). Download the `eol_pico-uf2` artifact from the run and unzip it. First build: 2026-11-21, Pico SDK 2.1.1, arm-none-eabi-gcc 13.2.1, 67,584 bytes.
 
 By hand, on Linux or a Raspberry Pi:
 
@@ -73,6 +73,7 @@ Debug text comes out of the UART on GP0 (pin 1) at 115200 baud, not over USB.
 
 ## Known limits
 
+- One compiler warning: `main.c` line 16 defines `SYS_CLK_HZ`, a name the Pico SDK already defines. Our code uses our value (128 MHz) as intended. Fix proposed: rename ours to `EOL_SYS_CLK_HZ`. Not done yet, because changes to existing firmware files need the owner's approval first.
 - USB identity is for development only: Raspberry Pi's vendor ID with the SDK's generic serial product ID. A shipped product needs its own.
 - The on-board LED is not used. On a Pico 2 W it hangs off the radio chip, which stays off.
 - There is no command yet to restart into BOOTSEL mode, so updating needs the button. Planned with the install scripts (step 11).

@@ -1,7 +1,7 @@
 # Phase 0: Hardware design review
 
 EOL vibro-acoustic test stand, Zynith IT Solutions Pvt Ltd.
-Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 (firmware skeleton and link proof) is written; its Pico build is not yet compiled and nothing is tested on a Pico.**
+Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 (firmware skeleton and link proof) is written; its Pico build compiles in CI, and nothing is tested on a Pico.**
 Date: 2026-11-21. Branch: `rev-2`.
 
 Nothing in this document has been run on hardware. Section 13 lists what was run on a laptop and what is untested on the target.
@@ -1046,7 +1046,7 @@ I need to know what your ultrasonic source is (model, or how it is driven) to sa
 | 14 | Microphone board pinout unread | wrong wiring could damage the microphone | nothing is wired until the flex markings are read (6.5) |
 | 15 | Pico 2 W regulator stays in its noisier mode | supply ripple in the microphone signal | larger supply filter (7.4); bench item 44 |
 | 16 | Microphone and ADXL383 on different clocks | their signals drift apart by up to 0.5 ms per capture | only matters for cross-timing features; sync input available (8.5) |
-| 17 | The firmware's Pico layer (clock, pins, USB) has never been compiled or run | step 2 will probably need fixes at the first build and at first power-up | the logic is tested apart from that layer, which is kept thin; CI will compile it at the first push; bench items 16 to 19 |
+| 17 | The firmware's Pico layer (clock, pins, USB) compiles but has never run | step 2 will probably need fixes at first power-up | the logic is tested apart from that layer, which is kept thin; CI compiles it at every push; bench items 16 to 19 |
 | 18 | Development USB identity (Raspberry Pi's vendor ID with the SDK's generic product ID) | not acceptable in a shipped product | get a product ID before release. **[NOT VERIFIED]** how Raspberry Pi allocates them |
 
 Operating system, for the record: the current release is Raspberry Pi OS (64-bit) based on Debian Trixie, image dated 2026-10-06, listed for both Pi 5 and Pi 4 class devices [OS]. The Raspberry Pi kernel repository's default branch is `rpi-6.18.y` [KRN]. **[NOT VERIFIED]** which kernel that image ships; the install script will record it.
@@ -1122,13 +1122,19 @@ What those 13 steps cover:
 
 To check that the tests can fail, I broke the firmware logic five ways (watchdog time ten times longer; a trip that keeps the old result; data that ignores the frame number; OK and NOK allowed together; dropped frames hidden from the sequence numbers). The tests caught all five.
 
-**The Pico build has not been compiled at all.** This laptop has no ARM compiler or Pico SDK. A CI workflow (`.github/workflows/ci.yml`) is written to build the firmware for the Pico 2 W and run the self-test on Linux at every push, but nothing has been pushed yet, so it has never run. Until it does, `main.c`, `usb_descriptors.c` and `CMakeLists.txt` are unchecked text: expect compile errors on the first build.
+**Run in CI (GitHub Actions, Ubuntu 24.04), 2026-11-21, CI run 44932969923 on commit 8164391:**
+
+- `scripts/selftest.sh` on Linux with Python 3.11.18 and with 3.13.18: 13 passed, none failed, 2 not run, both times. These are the same steps as on the laptop, against the same two stand-ins.
+- The Pico build: `firmware/` compiled and linked for the Pico 2 W (`PICO_BOARD=pico2_w`) with Pico SDK 2.1.1 and arm-none-eabi-gcc 13.2.1. It built at the first attempt and produced `eol_pico.uf2`, 67,584 bytes.
+- One compiler warning in our code: `main.c` line 16 defines `SYS_CLK_HZ`, a name the SDK already defines. Our code uses our value, 128 MHz, as intended. The fix is to rename ours; it waits for the owner's approval, as every change to an existing firmware file does.
+
+**Compiling is not running.** A successful build shows the code is valid C that links against the SDK. It says nothing about whether the clock starts, the USB device appears, or a pin moves.
 
 **Not run, not tested**
 
-- **Nothing has run on a Pico.** `main.c` and `usb_descriptors.c`, which hold the clock setup, the pins and the USB layer, have never been compiled or executed.
+- **Nothing has run on a Pico.** `main.c` and `usb_descriptors.c`, which hold the clock setup, the pins and the USB layer, have been compiled but never executed.
 - Bench items 16 to 19 (the real link) are not done. They are `scripts/selftest.sh --hardware --long` on the CM5 with the Pico plugged in.
-- Nothing has run on a CM5 or CM4, or on any Linux machine. The receiver and the self-test have run on macOS only. Linux pseudo-terminals and the bash version there may behave differently.
+- Nothing has run on a CM5 or CM4. The receiver and the self-test have run on macOS and on Ubuntu 24.04 in CI (x86-64), not on Raspberry Pi OS and not on an ARM board.
 - The heartbeat process's real-time priority and memory lock exist only on Linux and were not exercised on the laptop.
 - The pseudo-terminal stand-in is not USB. It proves the logic and the receiver. It says nothing about USB throughput, the two-port descriptor, or how Linux names the ports.
 - The microphone, the tach, Start, the real outputs and the ADXL383 are not in step 2 at all.
@@ -1138,7 +1144,7 @@ To check that the tests can fail, I broke the firmware logic five ways (watchdog
 | Step | Work | State |
 |---|---|---|
 | 1 | Phase 0 review (this document) | approved 2026-11-21; revision B adds the checks you asked for |
-| 2 | Pico firmware skeleton and CM5 receiver; link proof with synthetic data; simulator; first self-test | written; logic tested on a laptop; Pico build not yet compiled. **Ends when bench items 16 to 19 pass on your hardware** |
+| 2 | Pico firmware skeleton and CM5 receiver; link proof with synthetic data; simulator; first self-test | written; logic tested on a laptop and in CI; Pico build compiles in CI; never run on a Pico. **Ends when bench items 16 to 19 pass on your hardware** |
 | 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
 | 4 | Acquisition service and recording storage on the CM5 | a simulated and a real capture are stored and verified by hash |
 | 5 | Database and Setup screens | Setup flow works in the browser at both screen sizes |

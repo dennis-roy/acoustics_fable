@@ -2,7 +2,7 @@
 
 Python package `eol_link`. Standard library only: no pip installs. Needs Python 3.11 or newer. Runs on a CM5, a CM4 or any Linux or macOS machine.
 
-**State: step 2. Tested on a macOS laptop against stand-ins for the Pico. Not yet run on Linux, against a real Pico, or on a CM5 or CM4.**
+**State: step 2. Tested on a macOS laptop and on Ubuntu 24.04 in CI, against stand-ins for the Pico. Not yet run against a real Pico, or on a CM5 or CM4.**
 
 ## What is in it
 
@@ -61,5 +61,5 @@ Expected: 16 tests, `OK`. The system tests that use the simulator are in `../tes
 ## Not verified
 
 - Against a real Pico, and on a CM5 or CM4.
-- Real-time priority and memory locking: they are Linux features and were never exercised on the development laptop. The heartbeat process warns if it cannot get them. On the CM5 they need the service to run with the right privileges; the systemd unit comes with the install scripts (step 11).
+- Real-time priority and memory locking: they are Linux features, requested only by the `heartbeat` command, which no test starts. So they have never been exercised, on the laptop or in CI. The heartbeat process warns if it cannot get them. On the CM5 they need the service to run with the right privileges; the systemd unit comes with the install scripts (step 11).
 - The limits in `pdmcheck.py`. They are starting values until bench item 39 measures the microphone's real overload behaviour.
