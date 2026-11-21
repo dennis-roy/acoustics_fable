@@ -1,0 +1,51 @@
+name: ci
+
+# Two jobs:
+#   selftest: scripts/selftest.sh on Linux (no hardware), with the oldest and a newer Python.
+#   firmware: builds the Pico 2 W firmware and keeps the .uf2 as a download.
+# A green build proves the firmware compiles. It does not prove it works on a Pico.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: scripts/selftest.sh
+      - if: always()
+        run: cat build/selftest.log
+
+  firmware:
+    runs-on: ubuntu-24.04
+    env:
+      PICO_SDK_VERSION: "2.1.1"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the ARM compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+      - name: Fetch the Pico SDK
+        run: |
+          git clone --depth 1 --branch "$PICO_SDK_VERSION" https://github.com/raspberrypi/pico-sdk.git "$RUNNER_TEMP/pico-sdk"
+          git -C "$RUNNER_TEMP/pico-sdk" submodule update --init --depth 1 lib/tinyusb
+      - name: Build for the Pico 2 W
+        run: |
+          export PICO_SDK_PATH="$RUNNER_TEMP/pico-sdk"
+          cmake -S firmware -B build/firmware -DPICO_BOARD=pico2_w
+          cmake --build build/firmware -j
+          ls -l build/firmware/eol_pico.uf2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eol_pico-uf2
+          path: build/firmware/eol_pico.uf2
