@@ -1,0 +1,106 @@
+
+==============================================================================
+1. RP2350 clock plan (integer dividers only)
+==============================================================================
+f_pdm = f_sys / n, n even -> PIO clkdiv = n/2 (integer), 2 PIO cycles per bit.
+
+f_sys 96 MHz: 12 MHz x 128 = 1536 MHz VCO / 4 / 4
+  ultrasonic-mode clocks: /20=4.8 MHz, /22=4.364 MHz, /24=4 MHz, /26=3.692 MHz, /28=3.429 MHz, /30=3.2 MHz
+  standard-mode clocks (>= 1.9 MHz shown): /40=2.4 MHz, /42=2.286 MHz, /44=2.182 MHz, /46=2.087 MHz, /48=2 MHz, /50=1.92 MHz
+    4.8 MHz -> /24 = 200 kHz, /48 = 100 kHz
+    4 MHz -> /20 = 200 kHz, /40 = 100 kHz
+    3.2 MHz -> /16 = 200 kHz, /32 = 100 kHz
+
+f_sys 120 MHz: 12 MHz x 120 = 1440 MHz VCO / 6 / 2
+  ultrasonic-mode clocks: /26=4.615 MHz, /28=4.286 MHz, /30=4 MHz, /32=3.75 MHz, /34=3.529 MHz, /36=3.333 MHz, /38=3.158 MHz
+  standard-mode clocks (>= 1.9 MHz shown): /50=2.4 MHz, /52=2.308 MHz, /54=2.222 MHz, /56=2.143 MHz, /58=2.069 MHz, /60=2 MHz, /62=1.935 MHz
+    4 MHz -> /20 = 200 kHz, /40 = 100 kHz
+
+f_sys 128 MHz: 12 MHz x 128 = 1536 MHz VCO / 6 / 2
+  ultrasonic-mode clocks: /28=4.571 MHz, /30=4.267 MHz, /32=4 MHz, /34=3.765 MHz, /36=3.556 MHz, /38=3.368 MHz, /40=3.2 MHz
+  standard-mode clocks (>= 1.9 MHz shown): /52=2.462 MHz, /54=2.37 MHz, /56=2.286 MHz, /58=2.207 MHz, /60=2.133 MHz, /62=2.065 MHz, /64=2 MHz, /66=1.939 MHz
+    4 MHz -> /20 = 200 kHz, /40 = 100 kHz
+    3.2 MHz -> /16 = 200 kHz, /32 = 100 kHz
+
+f_sys 144 MHz: 12 MHz x 120 = 1440 MHz VCO / 5 / 2
+  ultrasonic-mode clocks: /30=4.8 MHz, /32=4.5 MHz, /34=4.235 MHz, /36=4 MHz, /38=3.789 MHz, /40=3.6 MHz, /42=3.429 MHz, /44=3.273 MHz, /46=3.13 MHz
+  standard-mode clocks (>= 1.9 MHz shown): /60=2.4 MHz, /62=2.323 MHz, /64=2.25 MHz, /66=2.182 MHz, /68=2.118 MHz, /70=2.057 MHz, /72=2 MHz, /74=1.946 MHz
+    4.8 MHz -> /24 = 200 kHz, /48 = 100 kHz
+    4 MHz -> /20 = 200 kHz, /40 = 100 kHz
+
+f_sys 150 MHz: 12 MHz x 125 = 1500 MHz VCO / 5 / 2
+  ultrasonic-mode clocks: /32=4.688 MHz, /34=4.412 MHz, /36=4.167 MHz, /38=3.947 MHz, /40=3.75 MHz, /42=3.571 MHz, /44=3.409 MHz, /46=3.261 MHz, /48=3.125 MHz
+  standard-mode clocks (>= 1.9 MHz shown): /62=2.419 MHz, /64=2.344 MHz, /66=2.273 MHz, /68=2.206 MHz, /70=2.143 MHz, /72=2.083 MHz, /74=2.027 MHz, /76=1.974 MHz, /78=1.923 MHz
+
+Chosen: f_sys = 128 MHz (12 MHz x 128 = 1536 MHz VCO, POSTDIV1 = 6, POSTDIV2 = 2)
+  wake-up (standard mode): 128 MHz / 64 = 2.000 MHz, clkdiv = 32, high = low = 32 sys cycles = 250.00 ns
+  ultrasonic: 128 MHz / 40 = 3.200 MHz, clkdiv = 20, high = low = 20 sys cycles = 156.25 ns
+  tach sampler: 3.2 MHz / 16 = 200 kHz, clkdiv = 640 (1 PIO cycle per sample)
+  crystal error 30 ppm -> f_pdm error 96 Hz (still inside 3.072-4.8 MHz)
+  crystal error 50 ppm -> f_pdm error 160 Hz (still inside 3.072-4.8 MHz)
+  half period 156.25 ns; PIO samples the pin 15.62 ns before the rising edge
+  setup margin = 156.25 - 15.62 - tDD(max) 40 = 100.6 ns
+  hold margin  = 15.62 + tDZ(min) 3 = 18.6 ns (pad and cable delay not included)
+
+==============================================================================
+2. Worst-case sine peak under-read, 1 - cos(pi f / fs)
+==============================================================================
+fs (kHz)          10k       20k       23k       25k       40k
+    100        4.89%    19.10%    24.99%    29.29%    69.10%
+    200        1.23%     4.89%     6.46%     7.61%    19.10%
+    400        0.31%     1.23%     1.63%     1.92%     4.89%  (= 100 kHz data interpolated x4, or 200 kHz x2)
+    800        0.08%     0.31%     0.41%     0.48%     1.23%  (= 200 kHz data interpolated x4)
+
+-25 % limit needs N >= 4.347 samples per cycle:
+  23 kHz -> fs >= 100.0 kHz
+  25 kHz -> fs >= 108.7 kHz
+
+==============================================================================
+3. Decimation filter options from a 3.2 MHz 1-bit stream
+==============================================================================
+
+A: /16 -> 200 kHz (alias-free to 80 kHz)
+  taps 259 at 3.2 MHz = 17 multiplies per output sample; group delay 40.3 us; span 81 us
+  gain at 1/20/23/25/40 kHz: +0.0000 dB, +0.0000 dB, +0.0000 dB, +0.0001 dB, +0.0000 dB
+  worst stopband gain from 120 kHz up: -98.7 dB
+  first alias band into 0-40 kHz starts at 160 kHz (gain there -112.6 dB)
+  step-response overshoot: 7.8 %
+
+B: /32 -> 100 kHz (alias-free to 40 kHz)
+  taps 1027 at 3.2 MHz = 33 multiplies per output sample; group delay 160.3 us; span 321 us
+  gain at 1/20/23/25/40 kHz: +0.0000 dB, +0.0000 dB, -0.0000 dB, +0.0000 dB, -0.0001 dB
+  worst stopband gain from 60 kHz up: -99.7 dB
+  first alias band into 0-40 kHz starts at 60 kHz (gain there -99.7 dB)
+  step-response overshoot: 8.8 %
+
+Alias bound that does not depend on the mic's modulator: a 1-bit stream has total power
+0 dBFS, so everything folded back is below the stopband gain (about -100 dBFS).
+Mic noise floor (A-weighted, audio band): -26 dBFS - 64.3 dB = -90.3 dBFS.
+
+==============================================================================
+4. Simulated capture: tone burst through a generic 2nd-order modulator
+==============================================================================
+23.007 kHz | A: /16 -> 200 kHz (ali | raw worst   -3.2 %  raw mean   -0.4 %  x4 interpolated worst  -0.65 %
+23.007 kHz | B: /32 -> 100 kHz (ali | raw worst  -24.9 %  raw mean   -6.0 %  x4 interpolated worst  -0.67 %
+25.013 kHz | A: /16 -> 200 kHz (ali | raw worst   -7.5 %  raw mean   -2.1 %  x4 interpolated worst  -0.58 %
+25.013 kHz | B: /32 -> 100 kHz (ali | raw worst  -29.2 %  raw mean   -9.8 %  x4 interpolated worst  -1.68 %
+(negative = under-read; positive values are modulator noise riding on the peak)
+
+==============================================================================
+5. Link throughput and storage
+==============================================================================
+raw PDM 400 kB/s + tach bits 25 kB/s + framing 4.1 kB/s = 429 kB/s = 35 % of the 1216 kB/s full-speed bulk ceiling
+
+Per 10 s capture and for 10 parts x 100 calibrated samples (1000 recordings):
+  raw PDM 3.2 Mbit/s       4.0 MB each     4.0 GB total
+  200 kHz int16 PCM        4.0 MB each     4.0 GB total
+  100 kHz int16 PCM        2.0 MB each     2.0 GB total
+  200 kHz float32 PCM      8.0 MB each     8.0 GB total
+
+==============================================================================
+6. Decimation cost on THIS machine (not a CM5/CM4 measurement)
+==============================================================================
+  A: /16 -> 200 kHz (ali 10 s of PDM -> 2000017 samples in 0.39 s
+  B: /32 -> 100 kHz (ali 10 s of PDM -> 1000033 samples in 0.89 s
+
+Figures written to docs/phase0/figures

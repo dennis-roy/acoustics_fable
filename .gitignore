@@ -1,0 +1,10 @@
+# Datasheet PDFs are downloaded locally, not committed (see docs/datasheets/README.md)
+docs/datasheets/*.pdf
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Build output
+build/
