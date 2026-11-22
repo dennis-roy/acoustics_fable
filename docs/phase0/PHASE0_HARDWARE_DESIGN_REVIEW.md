@@ -1230,9 +1230,22 @@ To check that these tests can fail, I broke the firmware core on purpose. Of the
 
 **Run on the CM5 (Rev 1.0, Raspberry Pi OS trixie, aarch64, Python 3.13.5), 2026-11-22, over SSH, commit 5f0ffac:** `scripts/selftest.sh`: 15 passed, none failed, 2 not run, the same as on the laptop. This is the first run on the target computer, still against stand-ins for the Pico. Filter timing in 4.7.
 
+**First run on a real Pico 2 W, 2026-11-22**, plugged into the development Mac (not the CM5), firmware 0.3.0 build 5c06811, flashed by the BOOTSEL drive. Nothing was wired to the Pico.
+
+| Check | Result |
+|---|---|
+| USB identity | "Zynith" / "EOL Pico front end"; four interfaces, named "EOL data" and "EOL heartbeat"; macOS made two serial ports |
+| Handshake (`eol_link info`) | board Pico 2 W, protocol 1.1, accepted. System clock 128 000 000 Hz configured, **128 000 kHz counted by the chip's frequency counter** (bench item 1) |
+| Real rate, 5 s | 500 PDM + 500 TACH frames, 430.8 kB/s, 0 missing, 0 CRC errors, 0 dropped: PASS |
+| Maximum rate, 5 s | 1015 frames, **805.9 kB/s**, 0 missing: PASS (target 650 kB/s, bench item 16, on the Mac) |
+| Watchdog check (`wdtest`) | PASS |
+| Microphone test with no microphone | the probe ran over 100 016 clock periods and reported "line stuck"; nothing was streamed; the Pico answered normally afterwards. So the PIO program and DMA ring run, and a missing microphone is caught |
+
+These are short runs on a Mac. Bench items 16 to 19 are defined on the CM5 with 10-minute runs and are still to do.
+
 **Not run, not tested**
 
-- **Nothing has run on a Pico, still.** `mic.pio` and `mic.c` are the part that touches the microphone, and neither stand-in runs them. They are compiled by CI and nothing more.
+- **No microphone has been read yet.** The capture code runs on the Pico (above), but has only seen an unconnected data pin.
 - The PIO timing, the DMA ring, the clock change while running and the pad settings are from the SDK headers and the RP2350 datasheet, not from a working board. Expect fixes at first power-up.
 - No real microphone has been read. The simulated signal is square waves through a simple 1-bit modulator. It proves the plumbing, not the acoustics.
 - The band levels are relative figures. Nothing here measures sound pressure.
