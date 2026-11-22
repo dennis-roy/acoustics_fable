@@ -1,7 +1,7 @@
 # Phase 0: Hardware design review
 
 EOL vibro-acoustic test stand, Zynith IT Solutions Pvt Ltd.
-Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 is done: bench items 16 to 19 passed on the Pico 2 W and CM5. The first part of step 3 (microphone capture) runs on the Pico; no microphone has been read yet.**
+Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 is done: bench items 16 to 19 passed on the Pico 2 W and CM5. The first part of step 3 works: a real microphone was read through the Pico on 2026-11-22.**
 Date: 2026-11-21. Branch: `rev-2`.
 
 Nothing in this document has been run on hardware. Section 13 lists what was run on a laptop and what is untested on the target.
@@ -1255,9 +1255,25 @@ These were short runs on a Mac.
 
 ModemManager is not running on this CM5, so nothing else probed the ports. **Build-plan step 2 is closed by these results.**
 
+**First microphone captures, 2026-11-22, 14:34 to 14:39 IST.** KAS-700-0164 flex in the Sunrom breakout, five jumper wires to the Pico 2 W as in `docs/bench/README.md` (SELECT pad open, no filter, no pull-down), Pico on the CM5, `eol_link mictest` over SSH, 3.2 MHz.
+
+| Check | Result |
+|---|---|
+| Probe (bench items 37 and 46c) | **SELECT = GND**, the same in all four runs. With pad 6 open, the microphone's internal pull-down [MIC s9] sets it. L and H never differed in the same period (both counts 0): the released line **holds its level**, so no pull-down is needed for the probe. The flex pinout as given (6.5) is confirmed by a live microphone |
+| Link | 4 runs, 5 500 frames, 0 missing, 0 CRC errors, 0 dropped |
+| Quiet room (item 20) | 49.98 to 50.00 % of bits are 1; longest run under 32 bits; PASS |
+| Quiet repeatability (a first look at item 40) | two quiet runs: audible band -66.8 and -67.8 dBFS, 20 to 40 kHz -78.2 and -77.6, 40 to 80 kHz -59.9 and -59.9. Within 1 dB |
+| Controlled sounds, 40 s in one-second slices | quiet seconds 0 to 2: audible about -66, 20 to 40 kHz about -78. **Keys shaken near the inlet, seconds 4 to 14: 20 to 40 kHz rose to -12 to -26 dBFS** (about 55 to 65 dB up), audible to about -25. Quiet again, seconds 18 to 27: back to the first values within about 2 dB. Clapping or talking, seconds 28 to 36: audible rose to -26 to -37 dBFS, 20 to 40 kHz rose less than with the keys (-27 to -44) |
+
+So the microphone hears, both audible and ultrasonic sound, and returns to the same quiet levels.
+
+**The 40 to 80 kHz band sits at -59.9 dBFS in quiet, its strongest frequency near 80 kHz.** It moves only with loud sound. This is most likely the 1-bit converter's own noise, which rises towards high frequencies in this kind of converter, and not sound. **[NOT VERIFIED]**: the datasheet does not describe the converter. Until it is understood, decisions should not use the band above about 60 kHz.
+
+**Overload check: first data for bench item 39.** During the keys and the clapping, every one-second slice tripped the long-run check: runs of 36 to 72 equal bits against the starting limit of 32 (4.8), while the share of 1 bits stayed at 49.9 to 50.3 %. The loudest slices had the longest runs. Whether those sounds really overloaded the microphone is not known: the band levels (-12 dBFS at most in one band) suggest headroom was left, which would mean the limit of 32 is too strict. **[NOT VERIFIED]**. The limit stays at 32 until item 39 is done properly (a source brought closer in steps, run length recorded against peak level). The capture is kept on the CM5 as `~/captures/go/mic_20261122T090846Z.pdm` with its SHA-256 in the `.json` beside it.
+
 **Not run, not tested**
 
-- **No microphone has been read yet.** The capture code runs on the Pico (above), but has only seen an unconnected data pin.
+- **Noise figures do not count yet.** The microphone is fed straight from 3V3(OUT) with no filter (7.4), on jumper wires.
 - The PIO timing, the DMA ring, the clock change while running and the pad settings are from the SDK headers and the RP2350 datasheet, not from a working board. Expect fixes at first power-up.
 - No real microphone has been read. The simulated signal is square waves through a simple 1-bit modulator. It proves the plumbing, not the acoustics.
 - The band levels are relative figures. Nothing here measures sound pressure.
@@ -1269,7 +1285,7 @@ ModemManager is not running on this CM5, so nothing else probed the ports. **Bui
 |---|---|---|
 | 1 | Phase 0 review (this document) | approved 2026-11-21; revision B adds the checks you asked for |
 | 2 | Pico firmware skeleton and CM5 receiver; link proof with synthetic data; simulator; first self-test | **done 2026-11-22**: bench items 16 to 19 passed on the Pico 2 W and CM5 (13.3) |
-| 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | capture, probe and the CM5 microphone test are written and tested against simulated microphones (13.3); never run on a Pico. Analyser firmware and filter not started. Bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
+| 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | capture, probe and the CM5 microphone test written; **a real microphone was read on 2026-11-22**: probe, quiet-room and sound checks pass; bench items 20, 37 and 46 done (13.3). Analyser firmware and filter not started. Bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
 | 4 | Acquisition service and recording storage on the CM5 | a simulated and a real capture are stored and verified by hash |
 | 5 | Database and Setup screens | Setup flow works in the browser at both screen sizes |
 | 6 | Analysis catalogue and ML | cross-validated results on synthetic data; bench items 38 to 42 |
