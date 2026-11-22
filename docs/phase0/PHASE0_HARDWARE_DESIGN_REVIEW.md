@@ -1,7 +1,7 @@
 # Phase 0: Hardware design review
 
 EOL vibro-acoustic test stand, Zynith IT Solutions Pvt Ltd.
-Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 (firmware skeleton and link proof) and the first part of step 3 (microphone capture) are written and tested against stand-ins. Nothing is tested on a Pico.**
+Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 is done: bench items 16 to 19 passed on the Pico 2 W and CM5. The first part of step 3 (microphone capture) runs on the Pico; no microphone has been read yet.**
 Date: 2026-11-21. Branch: `rev-2`.
 
 Nothing in this document has been run on hardware. Section 13 lists what was run on a laptop and what is untested on the target.
@@ -1241,7 +1241,19 @@ To check that these tests can fail, I broke the firmware core on purpose. Of the
 | Watchdog check (`wdtest`) | PASS |
 | Microphone test with no microphone | the probe ran over 100 016 clock periods and reported "line stuck"; nothing was streamed; the Pico answered normally afterwards. So the PIO program and DMA ring run, and a missing microphone is caught |
 
-These are short runs on a Mac. Bench items 16 to 19 are defined on the CM5 with 10-minute runs and are still to do.
+These were short runs on a Mac.
+
+**Bench items 16 to 19 on the CM5, 2026-11-22, 13:52 to 14:16:** Pico 2 W plugged straight into the CM5 IO Board, `scripts/selftest.sh --hardware --long` over SSH. Result: **PASS 20, FAIL 0, NOT RUN 2** (the microphone test, not yet wired, and the Pico build, which is CI's job).
+
+| Bench item | Result |
+|---|---|
+| 16, maximum rate, 10 s | 778.8 kB/s, 0 missing: PASS (target 650 kB/s) |
+| 17, real rate, 600 s | 60 000 PDM + 60 000 TACH frames, 430.6 kB/s, 0 missing, 0 dropped by the Pico: PASS |
+| 18, real rate, 600 s, every CM5 core busy | same counts, 0 missing, 0 dropped: PASS |
+| 19, handshake | accepted; serial ports named `usb-Zynith_EOL_Pico_front_end_DB6511D14D774692-if00` and `-if02` |
+| Watchdog logic | PASS |
+
+ModemManager is not running on this CM5, so nothing else probed the ports. **Build-plan step 2 is closed by these results.**
 
 **Not run, not tested**
 
@@ -1256,7 +1268,7 @@ These are short runs on a Mac. Bench items 16 to 19 are defined on the CM5 with 
 | Step | Work | State |
 |---|---|---|
 | 1 | Phase 0 review (this document) | approved 2026-11-21; revision B adds the checks you asked for |
-| 2 | Pico firmware skeleton and CM5 receiver; link proof with synthetic data; simulator; first self-test | written; logic tested on a laptop and in CI; Pico build compiles in CI; never run on a Pico. **Ends when bench items 16 to 19 pass on your hardware** |
+| 2 | Pico firmware skeleton and CM5 receiver; link proof with synthetic data; simulator; first self-test | **done 2026-11-22**: bench items 16 to 19 passed on the Pico 2 W and CM5 (13.3) |
 | 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | capture, probe and the CM5 microphone test are written and tested against simulated microphones (13.3); never run on a Pico. Analyser firmware and filter not started. Bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
 | 4 | Acquisition service and recording storage on the CM5 | a simulated and a real capture are stored and verified by hash |
 | 5 | Database and Setup screens | Setup flow works in the browser at both screen sizes |

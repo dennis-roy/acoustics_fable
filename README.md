@@ -9,11 +9,11 @@ Work happens on branch `rev-2`.
 | Step | Work | State |
 |---|---|---|
 | 1 | Hardware design review (Phase 0) | approved 2026-11-21, revision B |
-| 2 | Pico firmware skeleton, CM5 receiver, link proof with synthetic data, simulator, first self-test | **written; logic tested on a laptop and in CI; Pico build compiles in CI; never run on a Pico or a CM5** |
-| 3 | Microphone clock and capture, SELECT probe, microphone test | **capture, probe and test written; tested against simulated microphones; never run on a Pico.** Logic analyser firmware and filter not started |
+| 2 | Pico firmware skeleton, CM5 receiver, link proof with synthetic data, simulator, first self-test | **done 2026-11-22**: bench items 16 to 19 passed on the Pico 2 W plugged into the CM5 |
+| 3 | Microphone clock and capture, SELECT probe, microphone test | **capture, probe and test written; the capture runs on the Pico; no microphone read yet.** Logic analyser firmware and filter not started |
 | 4 to 11 | Storage, database, analysis, UI, I/O, reports, install | not started |
 
-**Nothing in this repository has been verified on hardware.** Each module's README says exactly what was run and where.
+**Only the USB link and the watchdog logic have been verified on hardware so far** (Pico 2 W and CM5, 2026-11-22). Each module's README says exactly what was run and where.
 
 ## How the pieces fit
 
