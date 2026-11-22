@@ -992,7 +992,7 @@ You have no oscilloscope, frequency counter or sound calibrator (fact 6). This s
 | **Loopback and synthetic data** | the whole link, byte for byte | anything analog |
 | **Relative acoustic tests** | repeatability, stability, golden against reject | anything in dB SPL |
 
-The second Pico's analyser firmware does not exist yet. It is a small step 3 deliverable. Step 2's own bench items (16 to 19) need none of this.
+**The second Pico's analyser firmware was written on 2026-11-22** (`firmware_la/`, CM5 tool `bench/`), before the second Pico was connected: core logic tested on a PC, firmware compiled by CI, never run on a Pico. Modes: pulse widths of one input with an unbiased duty cycle and detection of a frequency change (items 2 to 4, 8, 9), bursts of eight inputs at up to 150 MS/s (items 11, 12, 31), and a square-wave generator (item 30). Step 2's own bench items (16 to 19) need none of this.
 
 ### 10.2 Every Phase 0 item, classified
 

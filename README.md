@@ -37,6 +37,8 @@ Work happens on branch `rev-2`.
  app/         the application: database, login, Setup, models, Testing, reports
  analysis/    the analysis catalogue, golden gain and the models that decide OK / NOK
  deploy/      install.sh, systemd services, backup, signed releases
+ firmware_la/ the second Pico as a logic analyser (bench, no oscilloscope)
+ bench/       CM5 tool that drives it, with the bench-item pass limits
  scripts/     selftest.sh
  tests/       system tests: receiver against the simulator and against the firmware's logic
  docs/        the design review, the calculations behind it, datasheet links
@@ -55,6 +57,8 @@ Work happens on branch `rev-2`.
 | `analysis/` | `README.md`: every analysis, the gain, the models and the decision rule |
 | `docs/operator/` | `README.md`: operator work instructions |
 | `deploy/` | `README.md`: installing on the CM5, services, backup, updates |
+| `firmware_la/` | `README.md`: the logic analyser, its modes and the wiring |
+| `bench/` | `README.md`: bench checks with the analyser |
 | `docs/database/` | `README.md`: every table and column |
 | `docs/decisions/` | why the bigger choices were made |
 | `scripts/` | `README.md`: the self-test |

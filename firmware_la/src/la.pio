@@ -1,0 +1,37 @@
+; Logic analyser programs for the second Pico 2. Why they look like this: firmware_la/README.md.
+; NOT TESTED ON HARDWARE.
+
+; Pulse widths of one input (the jmp pin and in pin 0 are both that input).
+; Pushes the count n of every phase as it ends: high, low, high, low... A phase lasts
+; 2*n + 5 system clock cycles: every loop pass is 2 cycles and decrements x once; leaving a
+; loop costs 2 cycles, and the push block at the start of the next phase 3 cycles. The two
+; phases are built the same way, so neither is favoured and the duty cycle is not biased.
+.program la_widths
+    wait 0 pin 0          ; start cleanly at a rising edge
+    wait 1 pin 0
+    mov x, ~null
+    jmp high
+high_start:
+    mov isr, ~x           ; the low phase that just ended
+    push noblock
+    mov x, ~null
+high:
+    jmp pin high_dec      ; still high
+    jmp low_start         ; went low (2 cycles to leave, like the low loop)
+high_dec:
+    jmp x-- high
+low_start:
+    mov isr, ~x           ; the high phase that just ended
+    push noblock
+    mov x, ~null
+low:
+    jmp pin low_exit      ; went high
+    jmp x-- low
+low_exit:
+    jmp high_start        ; (2 cycles to leave, like the high loop)
+
+; Burst: all eight inputs, one sample per (divided) clock cycle, four samples per word.
+.program la_burst
+.wrap_target
+    in pins, 8
+.wrap

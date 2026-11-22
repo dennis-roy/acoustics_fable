@@ -52,3 +52,13 @@ jobs:
         with:
           name: eol_pico-uf2
           path: build/firmware/eol_pico.uf2
+      - name: Build the logic analyser for the second Pico (Pico 2)
+        run: |
+          export PICO_SDK_PATH="$RUNNER_TEMP/pico-sdk"
+          cmake -S firmware_la -B build/firmware_la -DPICO_BOARD=pico2
+          cmake --build build/firmware_la -j
+          ls -l build/firmware_la/eol_la.uf2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eol_la-uf2
+          path: build/firmware_la/eol_la.uf2

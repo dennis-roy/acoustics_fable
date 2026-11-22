@@ -13,7 +13,7 @@
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-export PYTHONPATH="$ROOT/link:$ROOT/simulator:$ROOT/dsp:$ROOT/acquire:$ROOT/app:$ROOT/analysis"
+export PYTHONPATH="$ROOT/link:$ROOT/simulator:$ROOT/dsp:$ROOT/acquire:$ROOT/app:$ROOT/analysis:$ROOT/bench"
 PY=${PYTHON:-python3}
 BUILD=$ROOT/build
 LOG=$BUILD/selftest.log
@@ -111,6 +111,7 @@ echo
 
 run "Python is 3.11 or newer" "$PY" -c 'import sys; sys.exit(sys.version_info < (3, 11))'
 run "unit tests: frame format, synthetic data, mic checks" "$PY" -m unittest discover -s link/tests
+run "bench tool for the logic analyser (fake analyser)" "$PY" -m unittest discover -s bench/tests
 if ! "$PY" -c 'import numpy' 2> /dev/null; then
   notrun "band-level tests" "numpy is not installed here (on a Raspberry Pi: sudo apt install python3-numpy)"
 fi
@@ -129,6 +130,8 @@ fi
 
 CORE_HOST=
 if command -v cc > /dev/null; then
+  run "logic analyser core (second Pico): compiles and passes its tests" \
+    sh -c 'cc -std=c11 -O2 -Wall -Wextra -Werror -Ifirmware_la/src -o "$1/la_core_test" firmware_la/host/la_core_test.c firmware_la/src/la_core.c -lm && "$1/la_core_test"' _ "$BUILD"
   run "firmware core compiles for this computer, no warnings" \
     cc -std=c11 -O2 -Wall -Wextra -Werror -Ifirmware/src -o "$BUILD/core_host" \
     firmware/host/core_host.c firmware/src/core.c firmware/src/proto.c
