@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test: firmware logic, link, microphone path and decimation filter.
+# Self-test: firmware logic, link, microphone path, decimation filter, acquisition and storage.
 #
 #   scripts/selftest.sh              everything that needs no Pico (about 2 minutes)
 #   scripts/selftest.sh --long       the same, with 10-minute link runs instead of 10 s
@@ -13,7 +13,7 @@
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-export PYTHONPATH="$ROOT/link:$ROOT/simulator:$ROOT/dsp"
+export PYTHONPATH="$ROOT/link:$ROOT/simulator:$ROOT/dsp:$ROOT/acquire"
 PY=${PYTHON:-python3}
 BUILD=$ROOT/build
 LOG=$BUILD/selftest.log
@@ -73,6 +73,28 @@ trap stop_device EXIT
 link() { "$PY" -m eol_link --port "$DATA_PORT" --hb-port "$HB_PORT" "$@"; }
 refused() { ! link info && grep -q 'REFUSED' <(link info); }
 
+# Build-plan step 4 on the real Pico: the service captures, the capture is saved and the
+# store is verified by hash. Uses its own data folder under build/, not the real store.
+acquisition_on_pico() {
+  local dir=$BUILD/acquire-selftest pid id
+  rm -rf "$dir"; mkdir -p "$dir"
+  acq() { "$PY" -m eol_acquire --data-dir "$dir" --socket "$dir/acquire.sock" "$@"; }
+  # Started directly, not through acq(): $! must be the service itself, so kill stops it.
+  "$PY" -m eol_acquire --data-dir "$dir" --socket "$dir/acquire.sock" serve --mic-id selftest \
+    --port "$DATA_PORT" > "$dir/service.log" 2>&1 &
+  pid=$!
+  for _ in $(seq 50); do [ -S "$dir/acquire.sock" ] && break; sleep 0.1; done
+  run "Pico: acquisition service captures 2 s, valid" acq capture --seconds 2
+  id=$(acq status | awk '$1 == "pending" {print $2}')
+  if [ -n "$id" ] && [ "$id" != None ]; then
+    run "Pico: capture saved as a recording" acq save "$id" --purpose bench --note selftest
+  else
+    notrun "Pico: capture saved as a recording" "no capture was waiting"
+  fi
+  run "Pico: recording verified by its SHA-256 (step 4)" acq verify
+  kill "$pid" 2> /dev/null; wait "$pid" 2> /dev/null
+}
+
 device_checks() { # device_checks "label"
   run "$1: version handshake" link info
   run "$1: link, real rate, ${SOAK} s, zero loss" link linktest --seconds "$SOAK"
@@ -94,8 +116,9 @@ if ! "$PY" -c 'import numpy' 2> /dev/null; then
 fi
 if "$PY" -c 'import numpy, scipy' 2> /dev/null; then
   run "decimation filter: coefficients, response, timing, aliasing" "$PY" -m unittest discover -s dsp/tests
+  run "acquisition and recording store (simulator)" "$PY" -m unittest discover -s acquire/tests
 else
-  notrun "decimation filter tests" "numpy or scipy is not installed (sudo apt install python3-numpy python3-scipy)"
+  notrun "decimation filter and acquisition tests" "numpy or scipy is not installed (sudo apt install python3-numpy python3-scipy)"
 fi
 
 CORE_HOST=
@@ -145,6 +168,7 @@ if [ "$HARDWARE" = 1 ]; then
     if [ "$MIC" = 1 ]; then
       run "Pico: microphone test, 5 s (bench items 20 and 37)" link mictest --seconds 5
       link mictest --seconds 5 | sed 's/^/    | /'
+      acquisition_on_pico
     else
       notrun "Pico: microphone test" "give --mic once the microphone is wired"
     fi

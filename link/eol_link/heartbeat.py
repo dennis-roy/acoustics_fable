@@ -25,7 +25,7 @@ import threading
 import time
 
 from . import protocol as p
-from .transport import LinkLost, Port
+from .transport import Port
 
 HEARTBEAT_PERIOD_S = 0.100
 APP_CHECKIN_PERIOD_S = 0.250

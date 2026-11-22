@@ -1,7 +1,7 @@
 # Phase 0: Hardware design review
 
 EOL vibro-acoustic test stand, Zynith IT Solutions Pvt Ltd.
-Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 is done: bench items 16 to 19 passed on the Pico 2 W and CM5. The first part of step 3 works: a real microphone was read through the Pico on 2026-11-22.**
+Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 is done: bench items 16 to 19 passed on the Pico 2 W and CM5. Step 3: microphone capture and decimation filter work on the bench. Step 4 is done: captures are stored and verified by hash on the CM5.**
 Date: 2026-11-21. Branch: `rev-2`.
 
 Nothing in this document has been run on hardware. Section 13 lists what was run on a laptop and what is untested on the target.
@@ -359,10 +359,10 @@ Pass target on both boards: under 1 s for the default setting. If the CM4 misses
 | 1 | Data line stuck at 0 or 1 for the whole capture | exact | no microphone, broken wire, no clock, wrong SELECT setting | written, `link/eol_link/pdmcheck.py` |
 | 2 | Longest run of equal bits | over 32 bits, which is 10 µs at 3.2 MHz | microphone overload, glitches | written |
 | 3 | Share of 1 bits over the capture | outside 45 to 55 % | DC fault, stuck segments | written |
-| 4 | Peak of the filtered signal | above -3 dBFS | overload that is short of saturating the bit stream | step 3, needs the filter |
-| 5 | Any lost or corrupt packet in the capture | any | link trouble | step 4; the link layer already counts them |
+| 4 | Peak of the filtered signal | above -3 dBFS | overload that is short of saturating the bit stream | written, `acquire/eol_acquire/evaluate.py` (step 4) |
+| 5 | Any lost or corrupt packet in the capture | any | link trouble | written, `link/eol_link/capture.py` (step 4) |
 
-Limits 2, 3 and 4 are **[NOT VERIFIED]**. The datasheet does not describe the microphone's 1-bit converter, so the run length that marks real overload is unknown. Bench item 39 measures it and the limits then go into configuration. Checks 1 to 3 are tested with made-up bit patterns only.
+Limits 2, 3 and 4 are **[NOT VERIFIED]**. The acquisition service applies all five to every capture and writes the limits it used into every recording. The datasheet does not describe the microphone's 1-bit converter, so the run length that marks real overload is unknown. Bench item 39 measures it and the limits then go into configuration. Checks 1 to 3 are tested with made-up bit patterns only.
 
 **Expected sound level at the microphone: not known, and not guessed.** I searched for measured ultrasonic levels near a running engine and near a squealing suspension part and found no figure I can cite. What I found were pass/fail thresholds in brake-squeal test procedures (SAE J2521 counts squeal from 70 dB(A) between 1.25 and 16 kHz; search-result summary only, the standard itself was not opened, **[NOT VERIFIED]**), which are not levels at a microphone and stop below the ultrasonic band.
 
@@ -1298,6 +1298,36 @@ Conclusion: **the limit of 32 bits is not too strict.** It fires when the signal
 
 **Not verified:** the filter has been checked against textbook signals and for consistency on real captures, not against a reference instrument. Speed on a CM4.
 
+### 13.5 Step 4: acquisition service and recording storage
+
+**What was added, 2026-11-22**
+
+| Part | Where |
+|---|---|
+| One microphone capture, with pre-roll and loss accounting, shared by the microphone test and the service | `link/eol_link/capture.py` (new) |
+| The recording file format, written safely (temporary name, flush, rename; data first, description last; read-only) | `link/eol_link/recording.py` (new) |
+| INVALID checks 1 to 5 and levels | `acquire/eol_acquire/evaluate.py` (new) |
+| Permanent recording store: only golden, failure-mode and bench recordings; SHA-256, microphone identity, firmware and filter version (D5); verify | `acquire/eol_acquire/store.py` (new) |
+| The acquisition service: capture, then save or discard, over a local socket | `acquire/eol_acquire/service.py`, `client.py` (new) |
+
+Changed: `link/eol_link/mictest.py` now uses the shared capture and file format. Its `--save` files leave out the pre-roll and are written the same safe way as permanent recordings.
+
+**Pre-roll, from measurement.** In the first quiet bench capture, the level below 200 Hz started at -44.6 dBFS and the mean of the samples at +0.0043 of full scale, both settling over about 0.4 s to the quiet values (about -55 to -62 dBFS, mean near 0). Above 200 Hz the level was -59.6 to -61.1 dBFS from the first 25 ms on. So the start-up effect is a slow drift below 200 Hz, and the ultrasonic band is usable at once. The service leaves out the first 0.5 s of every capture. The cause of the drift is **[NOT VERIFIED]**; the datasheet gives a wake-up time (15 ms max [MIC s2]) but nothing about low-frequency settling.
+
+**Run on the laptop:** 17 acquisition tests; `scripts/selftest.sh` 17 passed, none failed, 2 not run. I broke the code nine ways on purpose (test parts allowed; INVALID allowed as golden; description written before data; files left writable; SHA-256 not checked; capture kept after saving; peak check missing; pre-roll kept in the recording; lost frames not INVALID); the tests caught all nine.
+
+**Run on the CM5 with the Pico 2 W and the microphone, over SSH:** `scripts/selftest.sh --hardware --mic`: **26 passed, none failed**, 2 not run (the 10-minute runs, which need `--long`, and the Pico build, which is CI's). It includes a real capture through the service (2 s, VALID), saved and verified by its SHA-256 in a test folder. Then one permanent bench recording in the real store: `rec-20261122T100231Z-1e9bb3`, 5.00 s, quiet room, VALID (peak -46.4 dBFS, RMS -58.4 dBFS, 49.99 % ones, no long run), read-only, `verify` PASS.
+
+**This closes build-plan step 4:** a simulated and a real capture are stored and verified by hash.
+
+A fault found on the way: the first version of the self-test stopped only the shell around the service it started, and left the service running. Fixed and rerun; nothing is left running now.
+
+**Not run, not tested**
+
+- A real power cut or emergency exit during a save (bench item 34). The interrupted write is tested by simulation only.
+- The service under systemd: it has been started by hand. The unit comes with the install scripts (step 11).
+- Long-running behaviour: minutes, not days.
+
 ## 14. Build plan
 
 | Step | Work | State |
@@ -1305,7 +1335,7 @@ Conclusion: **the limit of 32 bits is not too strict.** It fires when the signal
 | 1 | Phase 0 review (this document) | approved 2026-11-21; revision B adds the checks you asked for |
 | 2 | Pico firmware skeleton and CM5 receiver; link proof with synthetic data; simulator; first self-test | **done 2026-11-22**: bench items 16 to 19 passed on the Pico 2 W and CM5 (13.3) |
 | 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | capture, probe and the CM5 microphone test written; **a real microphone was read on 2026-11-22**: probe, quiet-room and sound checks pass; bench items 20, 37 and 46 done (13.3). **Decimation filter built and run on real captures** (13.4). Analyser firmware and tach sampler not started. Bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
-| 4 | Acquisition service and recording storage on the CM5 | a simulated and a real capture are stored and verified by hash |
+| 4 | Acquisition service and recording storage on the CM5 | **done 2026-11-22**: a simulated and a real capture are stored and verified by hash (13.5) |
 | 5 | Database and Setup screens | Setup flow works in the browser at both screen sizes |
 | 6 | Analysis catalogue and ML | cross-validated results on synthetic data; bench items 38 to 42 |
 | 7 | Testing and calibration flow; interface board and DIO | bench items 12, 13, 28 to 35, 43, 45 |

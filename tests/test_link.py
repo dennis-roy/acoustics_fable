@@ -314,7 +314,8 @@ class LinkScenarios:
         self.link.hello()
         result = run_mictest(self.link, 1.5)
         self.assertEqual(result.failures, [])
-        self.assertEqual((result.frames, result.pico_generated, result.pico_dropped), (150, 150, 0))
+        self.assertEqual((result.capture.frames, result.capture.pico_generated, result.capture.pico_dropped),
+                         (150, 150, 0))
         self.assertAlmostEqual(result.pdm.ones_fraction, 0.5, delta=0.01)
         if not have_numpy():
             self.skipTest("numpy is not installed: the band levels were not checked")
@@ -329,13 +330,14 @@ class LinkScenarios:
         self.link.hello()
         threading.Timer(0.6, self.dev.stall, [0.15]).start()  # freeze the device mid-stream
         result = run_mictest(self.link, 1.5)
-        self.assertTrue(result.ended)
-        self.assertGreater(result.overruns, 0)
-        self.assertGreater(result.seq_gaps, 0)
-        self.assertGreater(result.gap_flags, 0)
-        self.assertEqual(result.pico_dropped, result.seq_gaps)
-        self.assertEqual(result.frames + result.seq_gaps, result.pico_generated)
-        self.assertEqual(result.pico_generated, 150)
+        cap = result.capture
+        self.assertTrue(cap.ended)
+        self.assertGreater(cap.overruns, 0)
+        self.assertGreater(cap.seq_gaps, 0)
+        self.assertGreater(cap.gap_flags, 0)
+        self.assertEqual(cap.pico_dropped, cap.seq_gaps)
+        self.assertEqual(cap.frames + cap.seq_gaps, cap.pico_generated)
+        self.assertEqual(cap.pico_generated, 150)
         self.assertFalse(result.passed)
 
     def test_microphone_arguments_are_checked(self):

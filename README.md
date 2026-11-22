@@ -11,7 +11,8 @@ Work happens on branch `rev-2`.
 | 1 | Hardware design review (Phase 0) | approved 2026-11-21, revision B |
 | 2 | Pico firmware skeleton, CM5 receiver, link proof with synthetic data, simulator, first self-test | **done 2026-11-22**: bench items 16 to 19 passed on the Pico 2 W plugged into the CM5 |
 | 3 | Microphone clock and capture, SELECT probe, microphone test | **capture, probe, test and decimation filter written; a real microphone was read on 2026-11-22 and responds to sound.** Logic analyser firmware and tach sampler not started |
-| 4 to 11 | Storage, database, analysis, UI, I/O, reports, install | not started |
+| 4 | Acquisition service and recording storage | **done 2026-11-22**: a real capture stored and verified by hash on the CM5 |
+| 5 to 11 | Database, analysis, UI, I/O, reports, install | not started |
 
 **Verified on hardware so far** (Pico 2 W, CM5 and the KAS-700-0164 microphone, 2026-11-22): the USB link, the watchdog logic, and microphone capture with relative sound checks. Absolute levels are not measured. Each module's README says exactly what was run and where.
 
@@ -27,6 +28,7 @@ Work happens on branch `rev-2`.
  protocol/    the wire format both sides follow
  simulator/   a Pico in software, for working without hardware
  dsp/         the decimation filter: 1-bit stream to 200 kHz samples
+ acquire/     the acquisition service: captures, INVALID checks, permanent recordings
  scripts/     selftest.sh
  tests/       system tests: receiver against the simulator and against the firmware's logic
  docs/        the design review, the calculations behind it, datasheet links
@@ -40,6 +42,7 @@ Work happens on branch `rev-2`.
 | `link/` | `README.md`: the CM5-side tools |
 | `simulator/` | `README.md`: running without a Pico |
 | `dsp/` | `README.md`: the decimation filter, its versions, how to make a WAV file from a capture |
+| `acquire/` | `README.md`: the acquisition service and the recording store |
 | `scripts/` | `README.md`: the self-test |
 | `docs/bench/` | `README.md`: setting up the CM5, flashing the Pico, wiring the microphone on the bench |
 
@@ -55,7 +58,7 @@ scripts/selftest.sh
 Needs Python 3.11 or newer, with numpy and scipy for all steps to run. Takes about 2 minutes. Expected last line:
 
 ```
-PASS 16   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)
+PASS 17   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)
 ```
 
 ## First run on the real hardware

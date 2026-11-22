@@ -42,7 +42,7 @@ scripts/selftest.sh
 
 - `python3 --version` must say 3.11 or newer.
 - `groups` must include `dialout`. That group may open serial ports. If it is missing: `sudo usermod -aG dialout $USER`, then log out and in again. **[NOT VERIFIED]** whether the Raspberry Pi OS default user is in it.
-- `scripts/selftest.sh` needs no Pico and takes about 2 minutes. Expected last line: `PASS 16   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)`.
+- `scripts/selftest.sh` needs no Pico and takes about 2 minutes. Expected last line: `PASS 17   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)`.
 
 numpy is for the band levels in the microphone test; scipy only for the filter timing in part 3. The link itself needs nothing beyond Python.
 
@@ -153,6 +153,8 @@ Then three listening checks. Each is a comparison between two runs, since there 
 3. **Shake a bunch of keys near the inlet during a run.** The `20 to 40 kHz` and `40 to 80 kHz` bands rise. Keys are a handy broadband ultrasonic source; that is general knowledge, not a calibrated level.
 
 To keep the raw recording of a run, add `--save captures`. It writes the 1-bit stream and a small description with its SHA-256.
+
+For permanent recordings (Golden OK, failure modes, bench), use the acquisition service instead: see `../../acquire/README.md`. It runs the INVALID checks and keeps each recording with its SHA-256, microphone identity, firmware and filter version.
 
 To turn a saved recording into ordinary samples (200 kHz) and a WAV file you can open in Audacity:
 

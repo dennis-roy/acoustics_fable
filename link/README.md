@@ -14,6 +14,8 @@ Python package `eol_link`. Standard library only, with one exception: the band l
 | `linktest.py` | The link proof: a synthetic stream checked for sequence, CRC and content |
 | `wdtest.py` | Checks the Pico's heartbeat watchdog through the Pico's own reports |
 | `heartbeat.py` | The heartbeat process, and the application's check-in with it |
+| `capture.py` | One microphone capture: starts the stream, receives every frame, leaves out the pre-roll, counts any loss |
+| `recording.py` | The recording file format (`.pdm` and `.json` with SHA-256), written safely, and its check |
 | `mictest.py` | The microphone test: probe result, a complete stream, bit statistics, band levels |
 | `pdmcheck.py` | Checks on the raw microphone bit stream that make a capture INVALID (stuck line, overload runs, lopsided bits) |
 | `pdmspec.py` | Level per frequency band, straight from the 1-bit stream. The only module that needs numpy |
