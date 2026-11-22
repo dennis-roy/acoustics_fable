@@ -1,0 +1,10 @@
+{
+  "name": "Mando suspension (shock absorber / strut)",
+  "status": "starting template, NOT VERIFIED with Mando: confirm the failure modes, capture length and rig before use",
+  "capture_s": 8,
+  "tach_connected": false,
+  "tach_ppr": null,
+  "failure_modes": ["squeak", "squeal", "rattle", "knock", "hiss"],
+  "orders": [],
+  "notes": "Driven by a stroking rig, so no tach: the random path (impulsiveness, spectral kurtosis, transients) and the 1/3- and 1/12-octave bands carry most of the information. Order tracking stays off."
+}

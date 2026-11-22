@@ -1,0 +1,12 @@
+[Unit]
+Description=EOL test stand: emergency-exit input -> orderly shutdown (NOT a safety function)
+After=eol-app.service
+
+[Service]
+EnvironmentFile=/etc/eol/eol.env
+ExecStart=@PREFIX@/venv/bin/python @PREFIX@/current/deploy/emergency_exit.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

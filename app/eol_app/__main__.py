@@ -23,6 +23,11 @@ def main() -> int:
     sub.add_parser("migrate", help="create or update the database, then stop")
     sub.add_parser("reset-master", help="give the master login a new temporary password (recovery; needs a shell on the CM5)")
     sub.add_parser("info", help="database file, schema version, counts")
+    bk = sub.add_parser("backup", help="copy the database (online), recordings and models to a folder, e.g. a USB stick")
+    bk.add_argument("dest")
+    rs = sub.add_parser("restore", help="put a backup back (stop the services first)")
+    rs.add_argument("source")
+    rs.add_argument("--force", action="store_true", help="replace an existing database")
     args = ap.parse_args()
     db_path = args.db or str(data_dir() / "eol.sqlite3")
 
@@ -40,7 +45,15 @@ def main() -> int:
             serve(app, host=args.host, port=args.port, threads=8)
         return 0
 
+    if args.cmd == "restore":
+        from .backup import restore
+        print(restore(args.source, db_path, force=args.force))
+        return 0
     conn = dbm.open_database(db_path, hash_password)
+    if args.cmd == "backup":
+        from .backup import backup
+        print(f"backup written to {backup(conn, db_path, args.dest)}")
+        return 0
     if args.cmd == "migrate":
         print(f"{db_path}: schema version {dbm.schema_version(conn)}")
     elif args.cmd == "info":

@@ -20,6 +20,12 @@ from . import db as dbm
 from .web import login_required, row_or_404
 
 NAME = re.compile(r"[A-Za-z0-9 \-_./()]+")
+PROFILES_DIR = Path(__file__).with_name("profiles")
+
+
+def profiles() -> dict[str, dict]:
+    """Application templates (Mando, Ashok Leyland): failure modes, capture, tach and orders to start from."""
+    return {p.stem: json.loads(p.read_text()) for p in sorted(PROFILES_DIR.glob("*.json"))}
 
 
 def _name_problem(value: str, what: str, limit: int) -> str | None:
@@ -67,7 +73,7 @@ def register_setup(app: Flask) -> None:
     def part_new():
         limit = dbm.setting(g.db, "capture_limit_s")
         if request.method == "GET":
-            return render_template("part_form.html", part=None, limit=limit)
+            return render_template("part_form.html", part=None, limit=limit, profiles=profiles())
         f = request.form
         number, desc = f.get("part_number", "").strip(), f.get("description", "").strip()
         problem = _name_problem(number, "Part number", 20) or (desc and len(desc) > 60 and "Description: up to 60 characters")
@@ -77,12 +83,23 @@ def register_setup(app: Flask) -> None:
             problem = f"Part number {number} already exists."
         if problem:
             flash(problem)
-            return render_template("part_form.html", part=None, limit=limit, form=f), 400
+            return render_template("part_form.html", part=None, limit=limit, form=f, profiles=profiles()), 400
         with dbm.transaction(g.db):
             cur = g.db.execute(
                 "INSERT INTO parts (part_number, description, tach_connected, tach_ppr, capture_s, created_utc, created_by)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)", (number, desc, *values, dbm.utcnow(), g.user["user_id"]))
             dbm.audit(g.db, g.user["user_id"], "part_created", "part", cur.lastrowid, {"part_number": number, "description": desc})
+            prof = profiles().get(f.get("profile", ""))
+            if prof:
+                for mode in prof["failure_modes"]:
+                    g.db.execute("INSERT INTO failure_modes (part_id, name, created_utc, created_by) VALUES (?, ?, ?, ?)",
+                                 (cur.lastrowid, mode, dbm.utcnow(), g.user["user_id"]))
+                for o in prof["orders"]:
+                    g.db.execute("INSERT INTO part_orders (part_id, name, kind, order_value) VALUES (?, ?, ?, ?)",
+                                 (cur.lastrowid, o["name"], o["kind"], o["order_value"]))
+                dbm.audit(g.db, g.user["user_id"], "profile_applied", "part", cur.lastrowid, {"profile": f.get("profile")})
+        if prof:
+            flash(f"Started from the template \"{prof['name']}\". {prof['status']}.")
         return redirect(url_for("part_detail", part_id=cur.lastrowid))
 
     def _part_values(f, limit):

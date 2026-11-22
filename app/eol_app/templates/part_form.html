@@ -4,6 +4,13 @@
 <div class="card" style="max-width:560px"><form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">
   <label>Part number (up to 20: letters, digits, space - _ . / ( ))</label>
   <input name="part_number" maxlength="20" required value="{{ (form or {}).get('part_number', '') }}">
+  <label>Start from an application template (optional)</label>
+  <select name="profile" onchange="const p=this.selectedOptions[0].dataset;if(p.cap){document.getElementById('cap').value=p.cap;}
+    document.getElementById('tach').checked=p.tach==='1';document.getElementById('ppr').hidden=p.tach!=='1';">
+    <option value="">none</option>
+    {% for key, p in (profiles or {}).items() %}<option value="{{ key }}" data-cap="{{ p['capture_s'] }}" data-tach="{{ 1 if p['tach_connected'] else 0 }}">{{ p['name'] }}</option>{% endfor %}
+  </select>
+  <p class="muted">A template adds its failure modes and order table, and sets the capture length and tach. Templates are starting points: confirm them with the customer.</p>
   {% include "_part_fields.html" %}
   <p class="row"><button>Create</button><a class="button secondary" href="{{ url_for('setup_parts') }}">Cancel</a></p>
 </form></div>

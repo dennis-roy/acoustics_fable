@@ -16,7 +16,8 @@ Work happens on branch `rev-2`.
 | 6 | Analysis catalogue and models | **software done**: tested on synthetic parts; no model trained on real parts yet |
 | 7 | Testing and calibration flow | **software done**: calibration gate, results without raw data, PLC outputs through the Pico; interface board not built |
 | 8 | Users, login, reports | **done in software** |
-| 9 to 11 | Mando and Ashok Leyland applications, install scripts and services | see the review's build plan |
+| 9, 10 | Mando and Ashok Leyland applications | **templates**; details to be confirmed with the customers |
+| 11 | Install scripts, services, backup, signed updates | **written; dry run on the CM5**; the real install needs your `sudo` (`deploy/README.md`) |
 
 **Verified on hardware so far** (Pico 2 W, CM5 and the KAS-700-0164 microphone, 2026-11-22): the USB link, the watchdog logic, and microphone capture with relative sound checks. Absolute levels are not measured. Each module's README says exactly what was run and where.
 
@@ -35,6 +36,7 @@ Work happens on branch `rev-2`.
  acquire/     the acquisition service: captures, INVALID checks, permanent recordings
  app/         the application: database, login, Setup, models, Testing, reports
  analysis/    the analysis catalogue, golden gain and the models that decide OK / NOK
+ deploy/      install.sh, systemd services, backup, signed releases
  scripts/     selftest.sh
  tests/       system tests: receiver against the simulator and against the firmware's logic
  docs/        the design review, the calculations behind it, datasheet links
@@ -52,6 +54,7 @@ Work happens on branch `rev-2`.
 | `app/` | `README.md`: logins, Setup, models, Testing, reports, how to run it |
 | `analysis/` | `README.md`: every analysis, the gain, the models and the decision rule |
 | `docs/operator/` | `README.md`: operator work instructions |
+| `deploy/` | `README.md`: installing on the CM5, services, backup, updates |
 | `docs/database/` | `README.md`: every table and column |
 | `docs/decisions/` | why the bigger choices were made |
 | `scripts/` | `README.md`: the self-test |

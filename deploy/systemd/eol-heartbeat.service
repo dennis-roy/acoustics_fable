@@ -1,0 +1,18 @@
+[Unit]
+Description=EOL test stand: heartbeat to the Pico (outputs open if this stops)
+After=network.target
+
+[Service]
+User=@USER@
+EnvironmentFile=/etc/eol/eol.env
+ExecStart=@PREFIX@/venv/bin/python -m eol_link heartbeat --socket /run/eol/heartbeat.sock
+Restart=always
+RestartSec=1
+# Real-time priority and locked memory, so analysis load cannot starve it (review 7.2).
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+LimitMEMLOCK=infinity
+LimitRTPRIO=50
+
+[Install]
+WantedBy=multi-user.target

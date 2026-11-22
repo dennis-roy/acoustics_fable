@@ -224,5 +224,36 @@ class WebTests(unittest.TestCase):
                 self.assertIn(word, r.get_data(as_text=True))
 
 
+    def test_an_application_template_adds_its_failure_modes_and_orders(self):
+        csrf = self.master()
+        r = self.c.post("/setup/parts/new", data={"csrf": csrf, "part_number": "AL-ENG-1", "capture_s": "10",
+                                                   "tach_connected": "1", "tach_ppr": "1", "profile": "ashok_leyland_engine"},
+                        follow_redirects=True)
+        self.assertIn("NOT VERIFIED", r.get_data(as_text=True))
+        conn = self.db()
+        modes = {m[0] for m in conn.execute("SELECT name FROM failure_modes")}
+        self.assertIn("tappet noise", modes)
+        orders = dict(conn.execute("SELECT name, order_value FROM part_orders").fetchall())
+        self.assertEqual(orders, {"firing": 3.0, "camshaft": 0.5})
+        self.assertEqual(conn.execute("SELECT tach_connected, tach_ppr FROM parts").fetchone()[:], (1, 1))
+
+    def test_backup_and_restore_check_every_file(self):
+        from eol_app.backup import backup, restore
+        conn = self.db()
+        conn.execute("INSERT INTO parts (part_number, capture_s, created_utc) VALUES ('BK-1', 5, ?)", (dbm.utcnow(),))
+        rec = self.db_path.parent / "recordings" / "2026" / "11"
+        rec.mkdir(parents=True)
+        (rec / "rec-x.pdm").write_bytes(b"\x55" * 100)
+        out = backup(conn, str(self.db_path), str(self.db_path.parent / "usb"))
+        target = self.db_path.parent / "restored" / "eol.sqlite3"
+        self.assertIn("restored", restore(str(out), str(target)))
+        self.assertEqual(dbm.connect(target).execute("SELECT part_number FROM parts").fetchone()[0], "BK-1")
+        self.assertEqual((target.parent / "recordings" / "2026" / "11" / "rec-x.pdm").read_bytes(), b"\x55" * 100)
+        with self.assertRaises(SystemExit):
+            restore(str(out), str(target))  # exists: needs --force
+        (out / "recordings" / "2026" / "11" / "rec-x.pdm").write_bytes(b"changed")
+        with self.assertRaisesRegex(SystemExit, "damaged"):
+            restore(str(out), str(target), force=True)
+
 if __name__ == "__main__":
     unittest.main()

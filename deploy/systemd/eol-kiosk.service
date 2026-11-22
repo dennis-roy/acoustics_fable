@@ -1,0 +1,22 @@
+[Unit]
+Description=EOL test stand: touch-screen browser (kiosk) on the local display
+After=eol-app.service systemd-user-sessions.service
+Wants=eol-app.service
+Conflicts=getty@tty1.service
+
+[Service]
+User=@USER@
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty
+RuntimeDirectory=eol-kiosk
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/eol-kiosk
+# cage is a one-window Wayland compositor; the browser fills the screen whatever its resolution
+# (the resolution comes from the display, never from this file: spec, fact 5).
+ExecStart=/usr/bin/cage -s -- /usr/bin/chromium --kiosk --noerrdialogs --disable-infobars --incognito --ozone-platform=wayland http://127.0.0.1:8080/
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical.target multi-user.target

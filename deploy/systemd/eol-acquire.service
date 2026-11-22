@@ -1,0 +1,13 @@
+[Unit]
+Description=EOL test stand: acquisition service (captures, INVALID checks, recordings)
+After=network.target
+
+[Service]
+User=@USER@
+EnvironmentFile=/etc/eol/eol.env
+ExecStart=@PREFIX@/venv/bin/python -m eol_acquire serve --mic-id ${EOL_MIC_ID}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

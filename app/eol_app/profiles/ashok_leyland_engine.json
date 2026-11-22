@@ -1,0 +1,13 @@
+{
+  "name": "Ashok Leyland engine",
+  "status": "starting template, NOT VERIFIED with Ashok Leyland: confirm cylinders, tach pulses per revolution, gear teeth and failure modes before use",
+  "capture_s": 10,
+  "tach_connected": true,
+  "tach_ppr": 1,
+  "failure_modes": ["tappet noise", "gear whine", "turbo whine", "knock", "exhaust leak"],
+  "orders": [
+    {"name": "firing", "kind": "other", "order_value": 3.0, "why": "a four-stroke engine fires N/2 times per crankshaft revolution; 3.0 assumes 6 cylinders"},
+    {"name": "camshaft", "kind": "other", "order_value": 0.5, "why": "the camshaft turns once per two crankshaft revolutions"}
+  ],
+  "notes": "Order tracking needs the tach. Add gear-mesh orders (teeth x shaft ratio) from the engine's drawings; they are not known here."
+}

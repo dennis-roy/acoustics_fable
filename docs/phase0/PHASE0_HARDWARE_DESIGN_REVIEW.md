@@ -1380,6 +1380,16 @@ A fault found on the way: the first version of the self-test stopped only the sh
 - The PLC outputs: the logic is tested (refused without a heartbeat, accepted with one, in the simulator); there is no interface board, so no output has switched anything.
 - Start from the Pico's input, tach capture, licence binding, network dashboard, edge clients: not built.
 
+### 13.8 Steps 9 to 11: applications and installation
+
+**Applications (steps 9 and 10):** templates for a Mando suspension part and an Ashok Leyland engine, chosen when creating a part: failure modes, capture length, tach, and an order table. The engine template's firing order (3.0) assumes 6 cylinders (a four-stroke engine fires N/2 times per revolution) and the camshaft order is 0.5. Everything customer-specific is marked **[NOT VERIFIED]** in the templates: cylinders, pulses per revolution, gear teeth and the real failure modes come from the customers.
+
+**Installation (step 11):** `deploy/install.sh` (idempotent; `--dry-run`, `--rollback`, `--uninstall [--purge]`, `--kiosk`, `--emergency-exit`), systemd services, a udev rule, journal limits, versioned releases with an atomic switch, backup and restore with SHA-256 checks, and signed offline release packages (`ssh-keygen -Y`). Details: `deploy/README.md`.
+
+**Run:** application tests for the templates and for backup/restore pass (a damaged backup is refused before anything is copied); `install.sh --dry-run` on the bench CM5 listed the expected steps.
+
+**Not run:** the real install (needs `sudo`), the services at boot, the kiosk (no display attached), the emergency-exit service (no interface board).
+
 ## 14. Build plan
 
 | Step | Work | State |
@@ -1392,8 +1402,8 @@ A fault found on the way: the first version of the self-test stopped only the sh
 | 6 | Analysis catalogue and ML | **software done 2026-11-22**: cross-validated results on synthetic data (13.7). Bench items 38 to 42 need real parts |
 | 7 | Testing and calibration flow; interface board and DIO | **Testing flow done in software** (13.7); interface board, Start input and tach not built; bench items 12, 13, 28 to 35, 43, 45 open |
 | 8 | Users, login, reports | **done in software** (13.6, 13.7); licence binding, network dashboard and edge clients not built |
-| 9 | Mando suspension application | |
-| 10 | Ashok Leyland engine application (tach, order tracking) | |
-| 11 | Documentation set, install scripts, full self-test | fresh-machine install passes `selftest.sh` |
+| 9 | Mando suspension application | **template** (13.8); details to be confirmed with Mando |
+| 10 | Ashok Leyland engine application (tach, order tracking) | **template** and order tracking in software (13.7, 13.8); tach capture not built; details to be confirmed with Ashok Leyland |
+| 11 | Documentation set, install scripts, full self-test | **install scripts written, dry run on the CM5** (13.8); real install needs the owner's `sudo` |
 
 ADXL383 work slots in after step 3.
