@@ -1226,6 +1226,8 @@ Not changed: `proto.c`, `usb_descriptors.c`, `tusb_config.h`.
 
 To check that these tests can fail, I broke the firmware core on purpose. Of the first eight faults (probe verdict swapped; wrong half forwarded; bytes of each word swapped; one frame too many; dead line not refused; restart without the magic word; clock left running after a stop; lost capture data not reported) the tests caught six and missed the last two. I added a record of the microphone clock and a frozen-device test, then ran nine faults (the eight, plus the ultrasonic clock from the first moment). All nine were caught.
 
+**Run in CI (GitHub Actions, Ubuntu 24.04), 2026-11-22, run 44998293925 on commit 5c06811:** the self-test passed with Python 3.11 and 3.13, numpy installed (15 passed, none failed, 2 not run). The Pico build compiled and linked with `mic.c` and `mic.pio` at the first attempt, with no warnings in our code, and produced `eol_pico.uf2`, 75,264 bytes.
+
 **Not run, not tested**
 
 - **Nothing has run on a Pico, still.** `mic.pio` and `mic.c` are the part that touches the microphone, and neither stand-in runs them. They are compiled by CI and nothing more.

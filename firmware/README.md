@@ -41,7 +41,7 @@ Step 3 (2026-11-22) changed `CMakeLists.txt`, `src/board.h`, `src/hal.h`, `src/p
 
 ## Build
 
-Easiest: every push builds it in CI (`.github/workflows/ci.yml`). Download the `eol_pico-uf2` artifact from the run and unzip it. First build: 2026-11-21, Pico SDK 2.1.1, arm-none-eabi-gcc 13.2.1, 67,584 bytes.
+Easiest: every push builds it in CI (`.github/workflows/ci.yml`). Download the `eol_pico-uf2` artifact from the run and unzip it. Built with Pico SDK 2.1.1 and arm-none-eabi-gcc 13.2.1. Firmware 0.3.0, the first with microphone capture, is 75,264 bytes (2026-11-22).
 
 By hand, on Linux or a Raspberry Pi:
 
