@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>{{ part['part_number'] }}: {{ mode['name'] if mode else 'Golden OK' }}</h1>
+<div class="card" style="max-width:640px">
+  <p class="progress">{{ count }} of {{ target_n }} samples</p>
+  <ol>
+    <li>Put {{ 'a part showing "' ~ mode['name'] ~ '"' if mode else 'the Golden OK part' }} in the fixture.</li>
+    <li>Run it the same way every time.</li>
+    <li>Press Capture. It records {{ part['capture_s'] }} s after a 0.5 s start.</li>
+  </ol>
+  <form method="post" action="{{ url_for('capture_run', part_id=part['id']) }}" onsubmit="go.disabled=true;go.textContent='Capturing…'">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="target" value="{{ target }}">
+    <label>Unit serial or barcode (the physical part; used to keep its samples together)</label>
+    <input name="unit_serial" maxlength="40" autocomplete="off">
+    <label>Set</label>
+    <select name="sample_set"><option value="auto">Automatic (every {{ every }}th sample to validation)</option>
+      <option value="training">Training</option><option value="validation">Validation</option></select>
+    <p><button id="go" class="big" {% if count >= target_n %}disabled{% endif %}>Capture</button></p>
+  </form>
+  <a class="button secondary" href="{{ url_for('part_detail', part_id=part['id']) }}">Back to the part</a>
+</div>
+{% endblock %}

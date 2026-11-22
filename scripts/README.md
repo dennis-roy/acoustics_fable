@@ -12,7 +12,7 @@ scripts/selftest.sh --hardware --long   # bench items 16 to 19 in full
 scripts/selftest.sh --hardware --mic    # plus the microphone test, once the microphone is wired
 ```
 
-Needs Python 3.11 or newer. A C compiler (`cc`), numpy and scipy are used if present.
+Needs Python 3.11 or newer. A C compiler (`cc`), numpy, scipy and the packages in `../requirements.txt` are used if present. On the CM5 run it with the application's virtual environment so the application tests run too: `PYTHON=~/eol-venv/bin/python scripts/selftest.sh`.
 
 Every step ends as one of three:
 

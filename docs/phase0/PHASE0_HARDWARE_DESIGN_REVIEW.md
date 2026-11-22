@@ -1,7 +1,7 @@
 # Phase 0: Hardware design review
 
 EOL vibro-acoustic test stand, Zynith IT Solutions Pvt Ltd.
-Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 is done: bench items 16 to 19 passed on the Pico 2 W and CM5. Step 3: microphone capture and decimation filter work on the bench. Step 4 is done: captures are stored and verified by hash on the CM5.**
+Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 is done: bench items 16 to 19 passed on the Pico 2 W and CM5. Step 3: microphone capture and decimation filter work on the bench. Steps 4 and 5 are done: storage, database and Setup work on the CM5 with the real microphone.**
 Date: 2026-11-21. Branch: `rev-2`.
 
 Nothing in this document has been run on hardware. Section 13 lists what was run on a laptop and what is untested on the target.
@@ -1328,6 +1328,28 @@ A fault found on the way: the first version of the self-test stopped only the sh
 - The service under systemd: it has been started by hand. The unit comes with the install scripts (step 11).
 - Long-running behaviour: minutes, not days.
 
+### 13.6 Step 5: database and Setup
+
+**What was added, 2026-11-22**
+
+| Part | Where |
+|---|---|
+| Database choice: SQLite in WAL mode, with the comparison the spec asks for | `docs/decisions/2026-11-22-database-sqlite-wal.md` |
+| Schema version 1: every table the spec lists, plus context-change events and aborted captures; data dictionary and diagram | `app/eol_app/migrations/0001_initial.sql`, `docs/database/README.md` |
+| Logins: master with forced change, users per role, scrypt hashes, lockout, recovery command, sessions, CSRF tokens, audit log | `app/eol_app/web.py`, `security.py`, `admin_views.py` |
+| Programming variables with ranges, audited | `app/eol_app/db.py`, Programming screen |
+| Setup: parts, failure modes, capture then Save or Retest, training and validation sets, audited deletes that invalidate models | `app/eol_app/setup_views.py`, templates |
+| Pinned Python packages, installed in a virtual environment that uses Raspberry Pi OS's numpy and scipy | `requirements.txt` |
+
+**Run on the laptop:** 10 application tests pass, with Python's resource warnings turned into errors. They found two bugs on the way, both fixed: log out failed on a wrong field name, and Flask's short messages needed a secret key (now made once and kept beside the database, owner-readable only).
+
+**Run on the CM5, over SSH:** the virtual environment installed the pinned packages against the system's numpy 2.2.4 and scipy 1.15.3; the 10 application tests pass there. Then, end to end over HTTP with the real Pico and microphone, in a separate demo folder: master login and forced password change; part `DEMO-1` with failure mode `rattle`; a Golden OK capture through the web screen, VALID (peak -44.5 dBFS, RMS -56.7 dBFS); saved as sample 1 (training, unit `GOLD-1`); the database rows, the recording's SHA-256, filter name and the audit trail (`login`, `password_changed`, `part_created`, `failure_mode_created`, `sample_saved`) as expected; `verify` PASS.
+
+**Not run, not tested**
+
+- The screens on the real touch screen: no desktop or browser is installed on the CM5 yet (step 11).
+- Training models from the samples: step 6.
+
 ## 14. Build plan
 
 | Step | Work | State |
@@ -1336,7 +1358,7 @@ A fault found on the way: the first version of the self-test stopped only the sh
 | 2 | Pico firmware skeleton and CM5 receiver; link proof with synthetic data; simulator; first self-test | **done 2026-11-22**: bench items 16 to 19 passed on the Pico 2 W and CM5 (13.3) |
 | 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | capture, probe and the CM5 microphone test written; **a real microphone was read on 2026-11-22**: probe, quiet-room and sound checks pass; bench items 20, 37 and 46 done (13.3). **Decimation filter built and run on real captures** (13.4). Analyser firmware and tach sampler not started. Bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
 | 4 | Acquisition service and recording storage on the CM5 | **done 2026-11-22**: a simulated and a real capture are stored and verified by hash (13.5) |
-| 5 | Database and Setup screens | Setup flow works in the browser at both screen sizes |
+| 5 | Database and Setup screens | **done 2026-11-22**, except checking by eye on the touch screen (needs step 11): Setup works end to end with the real microphone (13.6) |
 | 6 | Analysis catalogue and ML | cross-validated results on synthetic data; bench items 38 to 42 |
 | 7 | Testing and calibration flow; interface board and DIO | bench items 12, 13, 28 to 35, 43, 45 |
 | 8 | Users, login, reports | |

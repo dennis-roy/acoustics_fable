@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Users</h1>
+<div class="card"><form method="post" class="row"><input type="hidden" name="csrf" value="{{ csrf }}">
+  <input name="username" placeholder="New user name" maxlength="32" required style="max-width:260px">
+  <select name="role" style="max-width:200px"><option>testing</option><option>setup</option><option>programming</option></select>
+  <button>Create</button></form>
+  <p class="muted">A new user gets a temporary password, shown once, that must be changed at first login.</p></div>
+<table><tr><th>User</th><th>Role</th><th>State</th><th></th></tr>
+{% for u in users %}<tr><td><b>{{ u['username'] }}</b>{% if u['is_master'] %} (master){% endif %}</td><td>{{ u['role'] }}</td>
+<td>{% if not u['active'] %}inactive{% elif u['locked_until_utc'] %}locked until {{ u['locked_until_utc'] }}{% else %}active{% endif %}
+{% if u['must_change_password'] %}, must change password{% endif %}</td>
+<td class="row">{% for a in ['reset', 'unlock'] + (['activate'] if not u['active'] else ['deactivate']) %}
+<form method="post" action="{{ url_for('admin_user_action', user_id=u['id'], action=a) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<button class="small secondary">{{ a }}</button></form>{% endfor %}</td></tr>{% endfor %}
+</table>
+{% endblock %}

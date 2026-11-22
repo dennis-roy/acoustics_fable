@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Audit log <span class="muted">latest 300</span></h1>
+<table><tr><th>When (UTC)</th><th>Who</th><th>What</th><th>Object</th><th>Detail</th></tr>
+{% for r in rows %}<tr><td>{{ r['at_utc'] }}</td><td>{{ r['username'] or '—' }}</td><td>{{ r['action'] }}</td>
+<td>{{ r['object_type'] or '' }} {{ r['object_id'] or '' }}</td><td><code>{{ r['detail'] or '' }}</code></td></tr>{% endfor %}</table>
+{% endblock %}

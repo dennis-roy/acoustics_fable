@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>{{ part['part_number'] }}: {{ mode['name'] if mode else 'Golden OK' }} <span class="muted">sample {{ count + 1 }} of {{ target_n }}</span></h1>
+<div class="grid">
+<div class="card">
+  <div class="verdict {{ 'valid' if cap['valid'] else 'invalid' }}">{{ 'VALID' if cap['valid'] else 'INVALID' }}</div>
+  {% if not cap['valid'] %}<ul>{% for r in cap['reasons'] %}<li>{{ r }}</li>{% endfor %}</ul>
+  <p>An INVALID capture cannot be saved as a calibrated sample. Fix the cause and press Retest.</p>{% endif %}
+  <form method="post" class="row"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="capture_id" value="{{ cap['capture_id'] }}">
+    <button formaction="{{ url_for('capture_save') }}" {% if not cap['valid'] %}disabled{% endif %}>Save ({{ sample_set }})</button>
+    <button class="secondary" formaction="{{ url_for('capture_retest') }}">Retest</button>
+  </form>
+</div>
+<div class="card"><h2>Capture</h2>
+<table>
+<tr><td>Length</td><td>{{ '%.2f' % cap['seconds'] }} s at {{ cap['clock_hz'] / 1e6 }} MHz</td></tr>
+<tr><td>Microphone probe</td><td>{{ cap['probe'] }}</td></tr>
+<tr><td>Frames</td><td>{{ cap['frames'] }} received, {{ cap['missing'] }} missing</td></tr>
+{% if cap['peak_dbfs'] is not none %}<tr><td>Level</td><td>peak {{ cap['peak_dbfs'] }} dBFS, rms {{ cap['rms_dbfs'] }} dBFS</td></tr>{% endif %}
+{% for b in cap['bands'] %}<tr><td>{{ (b['low_hz']/1000)|round(1) }} to {{ (b['high_hz']/1000)|round|int }} kHz</td><td>{{ b['dbfs'] }} dBFS</td></tr>{% endfor %}
+<tr><td>Unit</td><td>{{ unit or '—' }}</td></tr>
+</table></div>
+</div>
+{% endblock %}

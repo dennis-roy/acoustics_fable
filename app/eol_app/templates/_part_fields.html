@@ -1,0 +1,16 @@
+<label>Description (up to 60)</label>
+<input name="description" maxlength="60" value="{{ (form or {}).get('description', part['description'] if part else '') }}">
+<label>Capture duration</label>
+<div class="stepper">
+  <button type="button" class="secondary" onclick="step(-1)">−</button>
+  <input id="cap" name="capture_s" type="number" min="5" max="{{ limit }}" step="1"
+         value="{{ (form or {}).get('capture_s', part['capture_s'] if part else 10) }}" readonly>
+  <button type="button" class="secondary" onclick="step(1)">+</button><span>s (5 to {{ limit }})</span>
+</div>
+<label><input type="checkbox" name="tach_connected" value="1" id="tach" onchange="ppr.hidden=!this.checked"
+  {% if part and part['tach_connected'] %}checked{% endif %}>Tach connected?</label>
+<div id="ppr" {% if not (part and part['tach_connected']) %}hidden{% endif %}>
+  <label>Pulses per revolution</label><input name="tach_ppr" type="number" min="1" max="1000"
+    value="{{ part['tach_ppr'] if part and part['tach_ppr'] else 1 }}">
+</div>
+<script>function step(d){const c=document.getElementById('cap');c.value=Math.min(+c.max,Math.max(+c.min,+c.value+d));}</script>

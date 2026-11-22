@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row"><h1 style="flex:1">Setup: parts</h1><a class="button" href="{{ url_for('part_new') }}">New part</a></div>
+<table>
+<tr><th>Part number</th><th>Description</th><th>Capture</th><th>Tach</th><th>Failure modes</th><th>Samples</th><th></th></tr>
+{% for p in parts %}
+<tr><td><b>{{ p['part_number'] }}</b></td><td>{{ p['description'] }}</td><td>{{ p['capture_s'] }} s</td>
+<td>{{ (p['tach_ppr'] ~ ' PPR') if p['tach_connected'] else 'no' }}</td><td>{{ p['modes'] }}</td><td>{{ p['samples'] }}</td>
+<td><a class="button small" href="{{ url_for('part_detail', part_id=p['id']) }}">Open</a></td></tr>
+{% else %}<tr><td colspan="7" class="muted">No parts yet. Press "New part".</td></tr>{% endfor %}
+</table>
+{% endblock %}

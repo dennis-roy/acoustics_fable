@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row"><h1 style="flex:1">{{ part['part_number'] }} <span class="muted">{{ part['description'] }}</span></h1>
+<a class="button secondary" href="{{ url_for('setup_parts') }}">All parts</a></div>
+<div class="grid">
+<div class="card"><h2>Record samples</h2>
+  <p class="muted">First each failure mode, then Golden OK.</p>
+  {% for m in modes %}
+  <a class="button big" href="{{ url_for('capture_page', part_id=part['id'], target='mode:%d' % m['id']) }}">{{ m['name'] }}
+     <span class="progress">{{ m['n'] }}/{{ per_mode }}</span></a>
+  {% endfor %}
+  <a class="button big" style="background:var(--ok)" href="{{ url_for('capture_page', part_id=part['id'], target='golden') }}">Golden OK
+     <span class="progress">{{ golden }}/{{ golden_target }}</span></a>
+</div>
+<div class="card"><h2>Failure modes</h2>
+  <form method="post" action="{{ url_for('mode_add', part_id=part['id']) }}" class="row"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <input name="name" maxlength="30" placeholder="New failure mode (up to 30)" required style="flex:1"><button>Add</button></form>
+  <table>{% for m in modes %}<tr><td>{{ m['name'] }}</td><td>{{ m['n'] }} samples</td><td>
+    <form method="post" action="{{ url_for('mode_delete', mode_id=m['id']) }}" onsubmit="return confirm('Delete failure mode {{ m['name'] }} and its samples? This invalidates the models.')">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Delete</button></form></td></tr>
+  {% else %}<tr><td class="muted">None yet.</td></tr>{% endfor %}</table>
+</div>
+<div class="card"><h2>Part settings</h2>
+  <form method="post"><input type="hidden" name="csrf" value="{{ csrf }}">{% set form = None %}{% include "_part_fields.html" %}
+  <p><button>Save settings</button></p></form>
+</div>
+</div>
+<h2>Samples</h2>
+<table><tr><th>#</th><th>Kind</th><th>Set</th><th>Unit</th><th>Length</th><th>Recording</th><th>Saved</th><th></th></tr>
+{% for s in samples %}<tr><td>{{ s['id'] }}</td><td>{{ s['mode'] or 'Golden OK' }}</td><td>{{ s['sample_set'] }}</td>
+<td>{{ s['unit_serial'] or '' }}</td><td>{{ '%.1f' % s['seconds'] }} s</td><td><code>{{ s['recording_id'] }}</code></td><td>{{ s['created_utc'] }}</td>
+<td><form method="post" action="{{ url_for('sample_delete', sample_id=s['id']) }}" onsubmit="return confirm('Delete sample {{ s['id'] }}? This invalidates the models.')">
+<input type="hidden" name="csrf" value="{{ csrf }}"><button class="small danger">Delete</button></form></td></tr>
+{% else %}<tr><td colspan="8" class="muted">No samples yet.</td></tr>{% endfor %}</table>
+{% endblock %}
