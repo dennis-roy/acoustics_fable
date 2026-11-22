@@ -27,6 +27,17 @@ python3 -m eol_link --port /dev/pts/3 --hb-port /dev/pts/4 linktest --seconds 10
 
 `python3 -m pico_sim --proto-major 2` pretends to be firmware with another protocol version. `eol_link info` must then print `REFUSED`.
 
+## The simulated microphone
+
+`eol_link mictest` works against the simulator. The "microphone" sends square waves at 1 kHz and 32 kHz, made by the rule in `../protocol/README.md` ("Simulated microphone signal"), so the expected band levels are known: about -9 dBFS below 20 kHz and -21 dBFS between 20 and 40 kHz.
+
+| Option | Meaning |
+|---|---|
+| `--mic gnd` (default), `--mic vdd` | how the microphone's SELECT pin is tied |
+| `--mic stuck` | a dead data line: the probe must report it and nothing is streamed |
+| `--mic none` | firmware built without microphone capture |
+| `--mic-release low` (default), `hold`, `high` | what the data line does while the microphone is not driving it |
+
 ## Deliberate faults
 
 In tests, `PicoSim(faults=Faults(...))` makes it misbehave so the receiver can be shown to notice:
@@ -39,4 +50,4 @@ In tests, `PicoSim(faults=Faults(...))` makes it misbehave so the receiver can b
 
 ## What it does not simulate
 
-USB itself, the clocks, the pins, timing to better than about a millisecond, the microphone, the tach and Start. The synthetic stream is a test pattern, not sound. A simulated microphone signal comes with the acquisition work (step 4).
+USB itself, the clocks, the pins, timing to better than about a millisecond, the tach and Start. The synthetic stream is a test pattern, not sound, and the simulated microphone is two square waves, not a real acoustic signal.

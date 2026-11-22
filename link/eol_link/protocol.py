@@ -12,7 +12,7 @@ from array import array
 from dataclasses import dataclass
 
 PROTO_MAJOR = 1
-PROTO_MINOR = 0
+PROTO_MINOR = 1
 
 MAGIC = b"EOL1"
 HDR_LEN = 24
@@ -25,9 +25,11 @@ FRAME_PERIOD_S = 0.010
 # One PDM and one TACH frame every 10 ms, with headers and CRCs.
 REAL_RATE_BYTES_PER_S = (PDM_PAYLOAD + TACH_PAYLOAD + 2 * (HDR_LEN + CRC_LEN)) / FRAME_PERIOD_S
 
-T_INFO, T_PDM, T_TACH, T_EVENT, T_STATS, T_ACK, T_HB_STATUS = 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x10
-T_HELLO, T_STREAM_START, T_STREAM_STOP, T_SET_OUTPUTS, T_GET_STATS, T_HEARTBEAT = (
-    0x81, 0x82, 0x83, 0x84, 0x85, 0x90,
+T_INFO, T_PDM, T_TACH, T_EVENT, T_STATS, T_ACK, T_MIC_STATUS, T_HB_STATUS = (
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x10,
+)
+T_HELLO, T_STREAM_START, T_STREAM_STOP, T_SET_OUTPUTS, T_GET_STATS, T_REBOOT, T_HEARTBEAT = (
+    0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x90,
 )
 
 F_GAP, F_SYNTH = 0x01, 0x02
@@ -35,10 +37,27 @@ F_GAP, F_SYNTH = 0x01, 0x02
 ST_OK, ST_BAD_VERSION, ST_BAD_ARG, ST_NOT_IMPLEMENTED, ST_BUSY, ST_SAFE_STATE = range(6)
 STATUS_NAMES = ("OK", "BAD_VERSION", "BAD_ARG", "NOT_IMPLEMENTED", "BUSY", "SAFE_STATE")
 
-EV_STREAM_STARTED, EV_STREAM_STOPPED, EV_TX_OVERFLOW, EV_WATCHDOG_TRIP, EV_WATCHDOG_OK = range(1, 6)
+EV_STREAM_STARTED, EV_STREAM_STOPPED, EV_TX_OVERFLOW, EV_WATCHDOG_TRIP, EV_WATCHDOG_OK, EV_MIC_OVERRUN = range(1, 7)
 
 SRC_SYNTH, SRC_MIC = 0, 1
 MODE_REAL, MODE_MAX = 0, 1
+
+FEATURE_SYNTH, FEATURE_MIC, FEATURE_TACH, FEATURE_OUTPUTS = 1, 2, 4, 8
+
+# Microphone (protocol/README.md, "Microphone stream").
+MIC_WAKE_HZ = 2_000_000
+MIC_CLOCKS_HZ = (3_200_000, 4_000_000)  # STREAM_START clock code 0 and 1
+MIC_NOT_PROBED, MIC_SELECT_GND, MIC_SELECT_VDD, MIC_STUCK, MIC_AMBIGUOUS = range(5)
+MIC_VERDICT_NAMES = (
+    "not probed",
+    "SELECT = GND (data read at the rising edge)",
+    "SELECT = VDD (data read at the falling edge)",
+    "line stuck: no microphone, no power or no clock",
+    "ambiguous: the line changes but fits neither SELECT setting",
+)
+MIC_USE_NONE, MIC_USE_L, MIC_USE_H = 0, 1, 2
+MIC_PROBE_PERIODS = 100_000
+REBOOT_MAGIC = 0x544F4F42  # the bytes "BOOT"
 
 OUT_OK, OUT_NOK, OUT_UNDEFINED, OUT_READY, OUT_BUSY, OUT_WATCHDOG = (1 << i for i in range(6))
 STATE_HELLO, STATE_STREAMING, STATE_HEALTHY = 1, 2, 4
@@ -49,6 +68,7 @@ _HEAD = struct.Struct("<4sBBHIQ")  # 20 bytes; the header CRC follows
 _U32 = struct.Struct("<I")
 _INFO = struct.Struct("<BBBBBBHII8sHHI16s")
 _STATS = struct.Struct("<9IBBH")
+_MIC_STATUS = struct.Struct("<BBBB8I4x")
 
 
 @dataclass(frozen=True)
@@ -183,8 +203,47 @@ def pack_hello(major: int = PROTO_MAJOR, minor: int = PROTO_MINOR) -> bytes:
     return struct.pack("<BBH", major, minor, 0)
 
 
-def pack_stream_start(source: int, mode: int, seed: int, duration_ms: int) -> bytes:
-    return struct.pack("<BBHII", source, mode, 0, seed, duration_ms)
+def pack_stream_start(source: int, mode: int, seed: int, duration_ms: int, *, clock: int = 0,
+                      select: int = 0) -> bytes:
+    """clock and select apply to the microphone only: clock code, and which half to read
+    (0 = let the Pico find out, MIC_USE_L, MIC_USE_H)."""
+    return struct.pack("<BBBBII", source, mode, clock, select, seed, duration_ms)
+
+
+def pack_reboot() -> bytes:
+    return struct.pack("<I", REBOOT_MAGIC)
+
+
+@dataclass(frozen=True)
+class MicStatus:
+    """What the Pico's SELECT probe saw. L and H are the two reads in each clock period."""
+
+    verdict: int
+    use: int  # which read is being forwarded: MIC_USE_L or MIC_USE_H
+    forced: bool  # chosen by the command, not by the probe
+    clock_code: int
+    clock_hz: int
+    periods: int
+    ones_l: int
+    ones_h: int
+    lh_10: int  # periods where L was 1 and the H after it was 0
+    lh_01: int
+    hl_10: int  # periods where H was 1 and the L after it was 0
+    hl_01: int
+
+    @property
+    def verdict_name(self) -> str:
+        return MIC_VERDICT_NAMES[self.verdict] if self.verdict < len(MIC_VERDICT_NAMES) else str(self.verdict)
+
+
+def pack_mic_status(s: MicStatus) -> bytes:
+    return _MIC_STATUS.pack(s.verdict, s.use, 1 if s.forced else 0, s.clock_code, s.clock_hz, s.periods,
+                            s.ones_l, s.ones_h, s.lh_10, s.lh_01, s.hl_10, s.hl_01)
+
+
+def unpack_mic_status(payload: bytes) -> MicStatus:
+    v = _MIC_STATUS.unpack(payload[: _MIC_STATUS.size])
+    return MicStatus(v[0], v[1], bool(v[2]), *v[3:])
 
 
 def pack_set_outputs(mask: int) -> bytes:

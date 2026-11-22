@@ -19,13 +19,15 @@ from dataclasses import dataclass, field
 
 from eol_link import protocol as p
 
-FW_VERSION = (0, 2, 0)
+from . import micsig
+
+FW_VERSION = (0, 3, 0)
 HB_TIMEOUT_MS = 500
 TX_BUFFER = 65536
 TX_RESERVE = 512
 MAX_FRAMES_PER_POLL = 8
 STATS_BACKLOG_LIMIT = 4096
-FEATURES = 0x1 | 0x8  # synthetic source, outputs
+CAPTURE_RING_US = 40_960  # the firmware's capture ring: 8192 words of 32 samples at 3.2 MHz
 WD_HB_TIMEOUT, WD_APP_DEAD = 1, 2
 
 
@@ -36,6 +38,26 @@ class Faults:
     drop_pdm: set[int] = field(default_factory=set)  # never sent: the receiver sees a gap
     corrupt_pdm: set[int] = field(default_factory=set)  # a bit flipped on the wire: CRC fails
     wrong_data_pdm: set[int] = field(default_factory=set)  # wrong contents, correct CRC
+
+
+def mic_verdict(periods: int, *, ones_l: int, ones_h: int, lh_10: int, lh_01: int, hl_10: int,
+                hl_01: int) -> int:
+    """The SELECT probe's decision (protocol/README.md, "The SELECT probe")."""
+    small, large = periods // 64, periods // 16
+    same_if_gnd, same_if_vdd = min(lh_10, lh_01), min(hl_10, hl_01)
+    if same_if_gnd < small and same_if_vdd >= large:
+        return p.MIC_SELECT_GND
+    if same_if_vdd < small and same_if_gnd >= large:
+        return p.MIC_SELECT_VDD
+    if same_if_gnd < small and same_if_vdd < small:
+        l_alive = periods // 8 < ones_l < periods - periods // 8
+        h_alive = periods // 8 < ones_h < periods - periods // 8
+        if l_alive and not h_alive:
+            return p.MIC_SELECT_GND
+        if h_alive and not l_alive:
+            return p.MIC_SELECT_VDD
+        return p.MIC_STUCK
+    return p.MIC_AMBIGUOUS
 
 
 class _Pty:
@@ -64,7 +86,19 @@ class _Pty:
 
 class PicoSim:
     def __init__(self, *, proto_major: int = p.PROTO_MAJOR, proto_minor: int = p.PROTO_MINOR,
-                 faults: Faults | None = None) -> None:
+                 faults: Faults | None = None, mic: str | None = "gnd", mic_release: str = "low") -> None:
+        """mic: how the simulated microphone's SELECT pin is tied ("gnd" or "vdd"), "stuck"
+        for a dead data line, or None for firmware without microphone capture.
+        mic_release: what the data line does while the microphone is not driving it:
+        "low" (a pull-down), "hold" (it keeps its level) or "high"."""
+        if mic not in ("gnd", "vdd", "stuck", None) or mic_release not in ("low", "hold", "high"):
+            raise ValueError("unknown microphone setting")
+        self._mic, self._mic_release = mic, mic_release
+        if mic:
+            micsig.block()  # made now: making it mid-stream would stall the stream
+        self.rebooted = False  # the restart-to-bootloader command was accepted
+        self.mic_clock_log: list[int] = []  # every microphone clock change, in hertz; 0 = stopped
+        self._stall_until = 0.0
         self._proto = (proto_major, proto_minor)
         self._faults = faults or Faults()
         self._data, self._hb = _Pty(), _Pty()
@@ -73,12 +107,16 @@ class PicoSim:
         self._hb_parser = p.FrameParser(max_payload=64)
         self._tx = bytearray()
         self._hb_tx = bytearray()
-        self._seq = {t: 0 for t in (p.T_INFO, p.T_EVENT, p.T_STATS, p.T_ACK, p.T_HB_STATUS)}
+        self._seq = {t: 0 for t in (p.T_INFO, p.T_EVENT, p.T_STATS, p.T_ACK, p.T_MIC_STATUS, p.T_HB_STATUS)}
         self._t_start = time.monotonic_ns()
         self._now = 0
 
         self._hello_ok = False
         self._streaming = False
+        self._src = p.SRC_SYNTH
+        self._mic_phase = ""
+        self._mic_t = self._mic_clock_code = self._mic_clock_hz = self._mic_frame_us = 0
+        self._mic_forced = self._mic_use = self._mic_frames_target = self._mic_polled = 0
         self._mode = p.MODE_REAL
         self._seed = 0
         self._synth: p.SynthSource | None = None
@@ -113,8 +151,15 @@ class PicoSim:
         self._data.close()
         self._hb.close()
 
+    def stall(self, seconds: float) -> None:
+        """Freeze for a while, as firmware would if something held up its main loop."""
+        self._stall_until = time.monotonic() + seconds
+
     def run(self) -> None:
         while not self._stop.is_set():
+            if time.monotonic() < self._stall_until:
+                time.sleep(0.001)
+                continue
             select.select([self._data.master, self._hb.master], [], [], 0.001)
             self._now = (time.monotonic_ns() - self._t_start) // 1000
             for f in self._data_parser.feed(self._data.read()):
@@ -222,8 +267,104 @@ class PicoSim:
             self._dropped[ftype] += 1
             self._ovf_unreported += 1
 
+    # ---- microphone stream ----
+
+    def _mic_halves(self, periods: int) -> tuple[int, int]:
+        """The first `periods` L samples and H samples as two big numbers, earliest period in
+        the top bit. L is read at the end of the clock's low half, H at the end of the high half."""
+        mask = (1 << periods) - 1
+        data = int.from_bytes(micsig.stream(0, (periods + 7) // 8), "big") >> (-periods % 8)
+        released = {"hold": data, "low": 0, "high": mask}[self._mic_release]
+        if self._mic == "gnd":  # driven in the low half, released in the high half
+            return data, released
+        if self._mic == "vdd":  # driven in the high half, released in the next low half
+            return released >> 1, data
+        return 0, 0  # stuck
+
+    def _mic_probe(self) -> p.MicStatus:
+        n = p.MIC_PROBE_PERIODS
+        mask = (1 << n) - 1
+        low, high = self._mic_halves(n)
+        next_low = (low << 1) & mask  # L of the following period, lined up with H
+        pairs = mask & ~1  # the last H has no L after it
+        counts = dict(
+            ones_l=low.bit_count(), ones_h=high.bit_count(),
+            lh_10=(low & ~high & mask).bit_count(), lh_01=(~low & high & mask).bit_count(),
+            hl_10=(high & ~next_low & pairs).bit_count(), hl_01=(~high & next_low & pairs).bit_count())
+        verdict = mic_verdict(n, **counts)
+        use = self._mic_forced or {p.MIC_SELECT_GND: p.MIC_USE_L, p.MIC_SELECT_VDD: p.MIC_USE_H}.get(verdict, 0)
+        return p.MicStatus(verdict, use, bool(self._mic_forced), self._mic_clock_code, self._mic_clock_hz,
+                           n, **counts)
+
+    def _mic_payload(self, n: int) -> bytes:
+        """PDM frame n: the half of the clock that is being forwarded."""
+        data_half = p.MIC_USE_L if self._mic == "gnd" else p.MIC_USE_H
+        first = n * p.PDM_PAYLOAD
+        if self._mic == "stuck":
+            return bytes(p.PDM_PAYLOAD)
+        if self._mic_use == data_half:
+            return micsig.stream(first, p.PDM_PAYLOAD)
+        if self._mic_release != "hold":  # the released half sits at one level
+            return bytes([0x00 if self._mic_release == "low" else 0xFF]) * p.PDM_PAYLOAD
+        if self._mic == "gnd":  # H is the same bit as L, held
+            return micsig.stream(first, p.PDM_PAYLOAD)
+        # vdd, reading L: each L is the bit before it, held. The data one period late.
+        late = int.from_bytes(micsig.stream(first - 1, p.PDM_PAYLOAD + 1), "big") >> 1
+        return late.to_bytes(p.PDM_PAYLOAD + 1, "big")[1:]
+
+    def _mic_set_clock(self, hz: int) -> None:
+        if not self.mic_clock_log or self.mic_clock_log[-1] != hz:
+            self.mic_clock_log.append(hz)
+
+    def _mic_poll(self) -> None:
+        since = self._now - self._mic_t
+        behind_us, self._mic_polled = self._now - self._mic_polled, self._now
+        if self._mic_phase == "wake" and since >= 100_000:
+            self._mic_set_clock(self._mic_clock_hz)
+            self._mic_phase, self._mic_t = "settle", self._now
+        elif self._mic_phase == "settle" and since >= 20_000:
+            self._mic_phase, self._mic_t = "probe", self._now
+        elif self._mic_phase == "probe" and since >= p.MIC_PROBE_PERIODS * 1_000_000 // self._mic_clock_hz:
+            status = self._mic_probe()
+            self._emit(p.T_MIC_STATUS, p.pack_mic_status(status))
+            self._mic_use = status.use
+            if status.use == p.MIC_USE_NONE:
+                self._stream_stop()
+                return
+            self._mic_phase, self._mic_t = "run", self._now
+        elif self._mic_phase == "run":
+            if behind_us > CAPTURE_RING_US * 3 // 4:
+                # The capture ring was overwritten while nobody read it. Every frame that
+                # was being filled in that time is lost, and counted.
+                lost = max(1, (self._now - self._mic_t) // self._mic_frame_us - self._gen[p.T_PDM])
+                self._gen[p.T_PDM] += lost
+                self._dropped[p.T_PDM] += lost
+                self._ovf_unreported += lost
+                self._gap[p.T_PDM] = True
+                self._event(p.EV_MIC_OVERRUN, behind_us * self._mic_clock_hz // 16_000_000)
+            for _ in range(MAX_FRAMES_PER_POLL):
+                n = self._gen[p.T_PDM]
+                if self._now < self._mic_t + (n + 1) * self._mic_frame_us:
+                    break  # frame n is not complete yet
+                self._gen[p.T_PDM] += 1
+                flags = p.F_GAP if self._gap[p.T_PDM] else 0
+                if self._emit(p.T_PDM, self._mic_payload(n), seq=n, flags=flags,
+                              t_us=self._mic_t + n * self._mic_frame_us, is_stream=True):
+                    self._gap[p.T_PDM] = False
+                else:
+                    self._gap[p.T_PDM] = True
+                    self._dropped[p.T_PDM] += 1
+                    self._ovf_unreported += 1
+                if self._mic_frames_target and self._gen[p.T_PDM] >= self._mic_frames_target:
+                    self._stream_stop()
+                    return
+
+    # ---- both kinds of stream ----
+
     def _stream_stop(self) -> None:
         if self._streaming:
+            if self._src == p.SRC_MIC:
+                self._mic_set_clock(0)
             self._streaming = False
             self._event(p.EV_STREAM_STOPPED, self._gen[p.T_PDM])
 
@@ -231,7 +372,9 @@ class PicoSim:
         if not self._streaming:
             return
         timed_out = self._duration_us and (self._now - self._t0) >= self._duration_us
-        if self._mode == p.MODE_REAL:
+        if self._src == p.SRC_MIC:
+            self._mic_poll()
+        elif self._mode == p.MODE_REAL:
             limit = self._t0 + self._duration_us if timed_out else self._now
             for _ in range(MAX_FRAMES_PER_POLL):
                 if self._next_due >= limit:
@@ -262,18 +405,31 @@ class PicoSim:
         if len(payload) < 12 or payload[1] > p.MODE_MAX:
             return p.ST_BAD_ARG
         if payload[0] == p.SRC_MIC:
-            return p.ST_NOT_IMPLEMENTED
-        if payload[0] != p.SRC_SYNTH:
+            if self._mic is None:
+                return p.ST_NOT_IMPLEMENTED
+            if payload[1] != p.MODE_REAL or payload[2] > 1 or payload[3] > p.MIC_USE_H:
+                return p.ST_BAD_ARG
+        elif payload[0] != p.SRC_SYNTH:
             return p.ST_BAD_ARG
         if self._streaming:
             return p.ST_BUSY
         duration_ms = int.from_bytes(payload[8:12], "little")
         if duration_ms > 3_600_000:
             return p.ST_BAD_ARG
-        self._mode = payload[1]
+        self._src, self._mode = payload[0], payload[1]
         self._seed = int.from_bytes(payload[4:8], "little")
-        self._duration_us = duration_ms * 1000
-        self._synth = p.SynthSource(self._seed)
+        if self._src == p.SRC_MIC:
+            self._duration_us = 0  # the microphone stream counts frames instead
+            self._mic_clock_code, self._mic_forced = payload[2], payload[3]
+            self._mic_clock_hz = p.MIC_CLOCKS_HZ[payload[2]]
+            self._mic_frame_us = p.PDM_PAYLOAD * 8 * 1_000_000 // self._mic_clock_hz
+            self._mic_frames_target = duration_ms * 1000 // self._mic_frame_us
+            self._mic_phase, self._mic_t, self._mic_use = "wake", self._now, 0
+            self._mic_polled = self._now
+            self._mic_set_clock(p.MIC_WAKE_HZ)
+        else:
+            self._duration_us = duration_ms * 1000
+            self._synth = p.SynthSource(self._seed)
         self._gen = {p.T_PDM: 0, p.T_TACH: 0}
         self._gap = {p.T_PDM: False, p.T_TACH: False}
         self._t0 = self._next_due = self._now
@@ -301,7 +457,8 @@ class PicoSim:
             self._emit(p.T_INFO, p.pack_info(
                 proto_major=self._proto[0], proto_minor=self._proto[1], fw=FW_VERSION, board=0xFF,
                 hb_timeout_ms=HB_TIMEOUT_MS, sys_clk_hz=128_000_000, fc_sys_khz=0, unique_id=b"PYSIM\0\0\0",
-                features=FEATURES, build="sim"))
+                features=p.FEATURE_SYNTH | p.FEATURE_OUTPUTS | (p.FEATURE_MIC if self._mic else 0),
+                build="sim"))
             status = p.ST_OK if self._hello_ok else p.ST_BAD_VERSION
         elif f.type == p.T_STREAM_START:
             status = self._stream_start(f.payload)
@@ -311,8 +468,15 @@ class PicoSim:
             status = self._set_outputs(f.payload)
         elif f.type == p.T_GET_STATS:
             self._send_stats()
+        elif f.type == p.T_REBOOT:
+            if not self._hello_ok:
+                status = p.ST_BAD_VERSION
+            elif len(f.payload) < 4 or int.from_bytes(f.payload[:4], "little") != p.REBOOT_MAGIC:
+                status = p.ST_BAD_ARG
+            else:
+                self.rebooted = True
         else:
             return
         self._emit(p.T_ACK, p.pack_ack(f.type, status, f.seq))
         if f.type == p.T_STREAM_START and status == p.ST_OK:
-            self._event(p.EV_STREAM_STARTED, self._seed)
+            self._event(p.EV_STREAM_STARTED, self._mic_clock_hz if self._src == p.SRC_MIC else self._seed)

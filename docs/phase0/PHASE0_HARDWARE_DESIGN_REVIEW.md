@@ -1,7 +1,7 @@
 # Phase 0: Hardware design review
 
 EOL vibro-acoustic test stand, Zynith IT Solutions Pvt Ltd.
-Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 (firmware skeleton and link proof) is written; its Pico build compiles in CI, and nothing is tested on a Pico.**
+Status: **Revision B. Approved on 2026-11-21 with the decisions recorded in section 12. Build-plan step 2 (firmware skeleton and link proof) and the first part of step 3 (microphone capture) are written and tested against stand-ins. Nothing is tested on a Pico.**
 Date: 2026-11-21. Branch: `rev-2`.
 
 Nothing in this document has been run on hardware. Section 13 lists what was run on a laptop and what is untested on the target.
@@ -11,7 +11,7 @@ Nothing in this document has been run on hardware. Section 13 lists what was run
 | Change | Where |
 |---|---|
 | Board is a Pico 2 W, radio off; pin map and power-mode note rechecked | 6.1 |
-| Microphone board identified; its pinout is still unread | 6.5 |
+| Microphone board identified; pinout given by the owner on 2026-11-22, to be confirmed on the board before power | 6.5 |
 | End of capture (ultrasonic to sleep by stopping the clock): datasheet evidence | 3.3 |
 | SELECT unknown: firmware and footprint work either way, with a detection test | 3.4 |
 | Filter timing kept separately for CM4 and CM5; decimation ratio is a setting | 4.7 |
@@ -35,7 +35,7 @@ Nothing in this document has been run on hardware. Section 13 lists what was run
 2. **100 kHz raw samples miss the -25 % limit at 25 kHz** (-29.3 %). 200 kHz gives -7.6 %. See 4.1.
 3. **The ADXL383 datasheet has now been read, and three of the notes do not hold as written.** The 68 µs group delay belongs to a 64 kHz low-latency mode, not to the 16 kHz equalised setting (which is 246 to 265 µs). The overrange flag trips near 110 g, not at ±15 g. And with the ADXL383 making the clocks, 32 kHz comes only with 16-bit words. See section 8.
 4. **With no instruments, some Phase 0 limits cannot be proven at all**: clock edge time, jitter, absolute sound level, the microphone's real response. They are listed as accepted risks in 10.4, with the relative test that stands in for each.
-5. **The microphone board's own pinout sheet could not be opened.** The microphone on it is the one Phase 0 assumed, so the microphone figures stand. The connector pinout has to be read off the board. See 6.5.
+5. **The microphone board's own pinout sheet could not be opened.** The microphone on it is the one Phase 0 assumed, so the microphone figures stand. On 2026-11-22 you gave the pinout (Ground, Power, Data, Clock, Select, Ground) and a Knowles guide whose picture agrees with it. It is confirmed on your own board by bench item 46 before power is applied. See 6.5.
 
 **Still needed from you** is in section 12.3. Nothing there blocks step 2.
 
@@ -56,6 +56,8 @@ Every figure below cites one of these. "s" is the sheet number, "p" the printed 
 | VOR | Vishay VO14642AT / VO14642AABTR solid-state relay datasheet, doc 81646 | Rev 1.9, 28-Jul-2026 | Yes: pages 1 to 3 |
 | P2W | Raspberry Pi Pico 2 W datasheet RP-008304-DS-4 | Release 3, build 19/11/2026 | Yes: 1, 2.1, 3.1, 3.3, 3.4 and Figure 2 |
 | KAS | Digi-Key product page for Syntiant KAS-700-0164 (your link) | fetched 2026-11-21 | Partly: a fetch tool returned a summary of the page, not its text |
+| KSG | Knowles "MEMS Microphones for Full Range Audio and Ultrasonic Applications (Consumer) Selection Guide" (the PDF you supplied, `mic_selection_guide_v121222.pdf`) | footer KNO_MEMS MIC R5, (c) 2022, 4 pages | Yes, all 4 pages. It does not mention KAS-700-0164 or SPH0641LU4H-1. Used for the flex picture and the connector text on page 4 |
+| SUN | sunrom.com product pages 7400 ("8P PCB with 0.5mm FFC Connector Soldered") and 5673 ("8P 0.5mm Flip Lock FFC/FPC Connector") | fetched 2026-11-22 | Partly: a fetch tool reported the pages' text. Page 7400 says only "Other side has empty 1mm FPC connector layout". It gives no contact side, no pad numbering and no drawing |
 | KFX | Knowles KAS-700-0154 product brief (a sibling flex board, analog microphone), from Digi-Key's document server | (c) 2020 | Yes, 1 page. Used only for what it says about the flex connector in general |
 | KRN | raspberrypi/linux, branch `rpi-6.18.y` (`sound/soc/dwc/dwc-i2s.c`, `arch/arm64/boot/dts/broadcom/rp1.dtsi`, overlays `README`) | fetched 2026-11-21 | Yes, the parts cited |
 | OS | downloads.raspberrypi.com `os_list_imagingutility_v4.json` | fetched 2026-11-21 | Yes |
@@ -192,36 +194,35 @@ SELECT decides which half of the clock the microphone drives the data line in [M
 
 In the other half the microphone releases the line (the timing diagram on MIC s8 shows "High Z").
 
-**Firmware.** Three small PIO programs, chosen at run time: read before the rising edge, read before the falling edge, and a probe that reads at both. The margins in 5.3 are the same for both polarities, because the two cases are mirror images.
+**Firmware, as built in step 3.** One small PIO program reads the line at both clock edges all the time: "L" at the rising edge (the line as it was at the end of the low half) and "H" at the falling edge (the end of the high half). The firmware core then forwards the half that carries the data. This replaces the three programs planned in revision B: one program, no switching, and the probe needs no special mode. The margins in 5.3 are the same for both polarities, because the two cases are mirror images.
 
-**Detection test, no instruments.** The probe reads two bits per clock period: H at the end of the clock-high half, then L at the end of the clock-low half.
+**Detection test, no instruments.** Over about 100 000 periods the core counts how neighbouring reads differ:
 
 ```
- SELECT = VDD:  mic drives in the high half, releases in the low half
-                H[n] = data bit,   L[n] = the same bit, held or decayed towards 0
-                so "L[n] = 1 while H[n] = 0" never happens
-
- SELECT = GND:  mic drives in the low half, releases in the next high half
-                L[n] = data bit,   H[n+1] = the same bit, held or decayed towards 0
-                so "H[n+1] = 1 while L[n] = 0" never happens
+ SELECT = GND:  mic drives in the low half, lets go in the high half
+                L[n] = data bit,   H[n] = the same bit after the mic let go
+ SELECT = VDD:  mic drives in the high half, lets go in the next low half
+                H[n] = data bit,   L[n+1] = the same bit after the mic let go
 ```
 
-Count both "never" patterns over about 100 000 periods:
+Two reads of the same bit can differ in one direction only: the direction the released line drifts in. Two reads either side of a bit boundary differ in both directions, about equally often. So the pairing in which one direction (almost) never occurs is the same-bit pairing, and that names SELECT.
 
-| Count A: L[n] = 1, H[n] = 0 | Count B: H[n+1] = 1, L[n] = 0 | Verdict |
+| L then H: smaller of the two directions | H then next L: smaller of the two directions | Verdict |
 |---|---|---|
-| zero | about a quarter of the periods | SELECT = VDD: read before the falling edge |
-| about a quarter | zero | SELECT = GND: read before the rising edge |
-| both large | | fault: two microphones on the line, or noise |
-| both zero | | fault: line stuck, no microphone or no clock |
+| about zero | large | SELECT = GND: forward L |
+| large | about zero | SELECT = VDD: forward H |
+| about zero | about zero | only L varies: GND. Only H varies: VDD. Neither varies: the line is stuck (no microphone, no power, no clock) |
+| large | large | ambiguous: two microphones on the line, or noise |
 
-The firmware runs this during the pre-roll of the first capture after power-up, reports the verdict and the two counts, and refuses to capture on either fault.
+The exact thresholds are in `protocol/README.md` ("The SELECT probe"). The firmware runs the probe at the start of every microphone stream, reports the verdict and all six counts, and streams nothing from a stuck or ambiguous line.
 
-**This needs the released line to fall, never rise.** So MIC_DATA gets an **8.2 kΩ pull-down to GND** (a change from Phase 0, which had no resistor there). 8.2 kΩ is also the largest value the RP2350-E9 erratum allows for holding an input low [RP Appendix D.5.1, p1358 to 1359]. The microphone can drive it: its output is specified at 2 mA [MIC s4, VOH and VOL at IOUT = 2 mA], and 3.3 V across 8.2 kΩ is 0.4 mA.
+**Changed from revision B: the probe no longer needs the released line to fall.** Revision B counted one direction only and so required an 8.2 kΩ pull-down on MIC_DATA. The rule above works whether the released line holds its level, falls or rises, which matters because the bench has only jumper wires (fact 12). The 8.2 kΩ pull-down stays on the interface board all the same: it gives the line a defined level when no flex is plugged in, and 8.2 kΩ is the largest value that holds an RP2350 A2 input low against the leakage described in erratum RP2350-E9 [RP Appendix D.5.1, p1358]. The microphone can drive it: its output is specified at 2 mA [MIC s4, VOH and VOL at IOUT = 2 mA], and 3.3 V across 8.2 kΩ is 0.4 mA.
 
-**Footprint.** On the interface board the flex connector's SELECT pin goes to a three-pad solder jumper: bridge to GND, bridge to VDD, or leave open if the flex already ties it. Default: open until the flex's markings are read (6.5). The datasheet says SELECT "should not be left floating" [MIC s9], so if the flex does not tie it, bridge it to GND.
+Without the resistor, what the released line does on the bench is **[NOT VERIFIED]**. The erratum's leakage acts only while the pad is between the logic thresholds [RP Appendix D.5.1], and the microphone leaves the line at a full 0 or 1, so the line should simply hold. The probe's six counts will show what it does.
 
-**[NOT VERIFIED]**: all of this on hardware. It is step 3 work; step 2 contains none of it.
+**Footprint.** On the interface board the flex connector's SELECT pin goes to a three-pad solder jumper: bridge to GND, bridge to VDD, or leave open if the flex already ties it. Default: open for the first power-up; then set it as 6.5 describes, never to the side opposite to what the probe finds. The datasheet says SELECT "should not be left floating" [MIC s9], so if the flex does not tie it, bridge it to GND.
+
+**[NOT VERIFIED]**: all of this on hardware. The logic is tested against simulated microphones with SELECT either way and the released line holding, falling and rising (13.3).
 
 ## 4. Sampling requirement (item 3)
 
@@ -535,8 +536,8 @@ The ADXL383 pin numbers are those of the bare part. How the evaluation board's c
 
 | Question | Status |
 |---|---|
-| Connector pinout (which pad is VDD, GND, CLOCK, DATA, SELECT) | **[NOT VERIFIED]**. Knowles' brief for this board could not be opened |
-| Is SELECT tied on the flex, and to what | **[NOT VERIFIED]**. The design works either way (3.4) |
+| Connector pinout (which pad is VDD, GND, CLOCK, DATA, SELECT) | Given by you on 2026-11-22 and consistent with a published picture; see below. **[NOT VERIFIED]** on your own board until bench item 46 |
+| Is SELECT tied on the flex, and to what | It comes out on finger 5. Whether the flex also ties it: **[NOT VERIFIED]**. The design works either way (3.4) |
 | Is there a bypass capacitor on the flex, and what kind | **[NOT VERIFIED]** |
 
 What a sibling board's brief says [KFX, for KAS-700-0154, an analog microphone on the same kind of flex]: the flex has a 5-pin connector; each pin has a marking printed on the flex; "The same connector can be used for all microphone flexes, regardless of port orientation or electrical interface"; and that board carries a 0.1 µF X5R capacitor. Its pin names are for an analog microphone and do not transfer. It tells us where to look, nothing more.
@@ -546,7 +547,7 @@ What a sibling board's brief says [KFX, for KAS-700-0154, an analog microphone o
 | Seen | Where | What it means |
 |---|---|---|
 | "SPH" printed above a metal-can part | front, top | consistent with an SPH-series microphone; the full part number is not printed |
-| **Six** gold contact fingers | front, bottom edge | the sibling brief lists five pins [KFX]. So this flex is not the same connector as that brief, or one signal has two fingers. **[NOT VERIFIED]** which |
+| **Six** gold contact fingers | front, bottom edge | the sibling brief lists five pins [KFX]. Explained on 2026-11-22: ground has two fingers, 1 and 6 (see the pinout below) |
 | White printing directly above the fingers | front | these are the pin markings. A paper sticker ("MORE 2") covers them; only the tips show, and none is readable |
 | A white dot beside the left-most finger | front | probably the pin 1 mark. **[NOT VERIFIED]** |
 | Six bare square pads in two groups under the microphone | front | not populated; purpose unknown |
@@ -554,14 +555,56 @@ What a sibling board's brief says [KFX, for KAS-700-0154, an analog microphone o
 | A small hole near the top | back | the sound inlet. The microphone is a bottom-port part [MIC s1], so sound enters on the back, the side without the metal can |
 | "SYNTIANT", the Knowles logo, a year | back | maker's marks only; no pin names on this side |
 
-So the photos confirm the board and tell us which side must face the part under test (the back). They do not give the pinout, and they add one question: six fingers where five were expected.
+So the photos confirm the board and tell us which side must face the part under test (the back). They do not show the pinout, because the sticker covers it.
 
-**What I need now, either one:**
+**The pinout, as you gave it on 2026-11-22.** Hold the flex with the metal can facing you and the gold fingers pointing down. Left to right:
 
-1. The board's own sheet, downloaded by hand into `docs/datasheets/` (the "Datasheet" link on the Digi-Key page for KAS-700-0164). No risk to the part.
-2. Or the sticker lifted and a close photo of the printing above the six fingers. Peel slowly from the finger end, away from the two small parts on the right edge.
+| Finger | Letter printed above it [KSG p4 picture] | Signal (your statement) | Microphone pin [MIC s9] |
+|---|---|---|---|
+| 1, beside the white dot | G | Ground | 3 GROUND |
+| 2 | P | Power | 5 VDD |
+| 3 | D | Data | 1 DATA |
+| 4 | K | Clock | 4 CLOCK |
+| 5 | S | Select | 2 SELECT |
+| 6 | G | Ground | 3 GROUND |
 
-The pinout row above stays **[NOT VERIFIED]** until one of these arrives. Nothing gets wired to the flex before then.
+**What supports it**
+
+1. Your statement.
+2. The picture on page 4 of Knowles' selection guide [KSG], captioned "Example flex PCBs (Digital bottom port, Analog differential bottom port, Digital top port)". Its left-hand board is printed "SPH", has six fingers, and the letters above them are consistent with G P D K S G. The picture is small (346 pixels wide for three boards), so K, S and the last G are clear and the first three are not. The right-hand board, another digital microphone, shows the same six letters in the same order.
+3. That left-hand board matches your photos: the "SPH" print, six bare pads in two groups under the microphone, a white dot beside the left finger, six fingers.
+
+**What is still unproven**
+
+- **That your board carries the same letters.** They are under the sticker. The pictured board is printed "CORNELL", and the guide lists "Cornell II", SPH0655LM4H-1, on flex KAS-700-0153 [KSG p2]: a different microphone from ours. The guide names neither KAS-700-0164 nor SPH0641LU4H-1 anywhere. It also says "The only difference between the test boards of different microphones is the pinout and pad configuration" [KSG p4], so pinouts can differ from flex to flex. **[NOT VERIFIED]** until bench item 46.
+- **What the letters stand for.** The guide does not define them. Power, Data, Clock (K), Select and Ground is the natural reading and it is yours. Knowles' note AN18, named on the same page, is where they would be defined; it is not opened.
+
+**Update, 2026-11-22: you removed the sticker and read G-P-D-K-S-G, left to right.** That is part (a) of bench item 46, and it agrees with the table above. It is your reading; I have not seen a photo of it. What remains unproven is the meaning of the letters, which the first power-up settles (item 46c).
+
+**The breakout board you bought** is Sunrom's "8P PCB with 0.5mm FFC Connector Soldered", product 7400 [SUN]. Its page gives no contact side, pad numbering or drawing, so three things have to be read off the board itself before anything is wired:
+
+| Question | Why it matters | How to settle it |
+|---|---|---|
+| Are the connector's contacts on the floor or the roof of the slot? | the flex has gold on one side only, the side with the metal can. That side must face the contacts | look into the slot, or a photo |
+| Which solder pad goes to which contact, and are the eight pads in one row in the same order? | the wiring table is by pad | a photo of both sides of the board |
+| Which six of the eight contacts do the fingers meet? | a shift of one position puts power on the wrong finger | see below |
+
+Estimate from your photo of 2026-11-21, by counting pixels: the six fingers are evenly spaced, the flex tail is about 4.4 to 4.8 mm wide, and the first and last finger each sit about 1 mm in from the edge. An 8-position, 0.5 mm connector takes a 4.5 mm tail with contacts every 0.5 mm starting 0.5 mm from the edge. So the fingers should meet **contacts 2 to 7, with contacts 1 and 8 empty**. **[NOT VERIFIED]**: this is from a photo, good to about 10 %. Check: with the flex pushed home, the outermost contact on each side has no gold under it; or with a multimeter, two of the eight pads read as shorted to each other (the two grounds) and they are five pads apart.
+
+**Update, 2026-11-22 (fact 11): the breakout's pads are numbered 1 to 8, and pads 2 to 7 carry the flex.** As you gave it:
+
+| Breakout pad | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| Signal | none | ground | power | data | clock | select | ground | none |
+
+This agrees with the estimate above (contacts 2 to 7). It is your reading of the board; I have not seen it. The contact side of the connector is still not recorded: the flex's gold side must face the contacts. The first power-up is the test (bench item 46c).
+
+**What follows for the design**
+
+- **SELECT reaches finger 5**, so JP2 on the interface board can set it (3.4). Whether the flex also ties it is **[NOT VERIFIED]**: the pictured board has places marked R1 and R2, and yours has two small parts in about that position. So JP2 stays open for the first power-up, the probe (item 37) reports which way SELECT sits, and JP2 is then bridged to that same side or left open. Never bridge it to the opposite side: if the flex ties SELECT with a zero-ohm part, that would short the supply to ground.
+- **Two ground fingers, 1 and 6.** Both go to ground.
+- **A flex put in the wrong way round is not shown to be safe.** The order reversed is G S K D P G: ground still meets ground, but power lands on SELECT and the clock on DATA. Every pin is rated for up to 5 V [MIC s2], but the pin current limit of 5 mA [MIC s2] is not shown to hold with the microphone unpowered. The interface board marks finger 1, and item 46 is done before power.
+- **Mating connector.** For the bench it is the Sunrom board above. For reference, Knowles tests these flexes in "an 8 position 0.5mm Kyocera connector (MPN 046288008000846)", and sells an adapter, KCA2733, for "a 2x3 Sullins connector (MPN EBM03DSEN-S243) or for convenient connection with flying wires" [KSG p4]. **[NOT VERIFIED]**: which of the eight positions the six fingers meet (estimate above), and the finger pitch; neither connector's datasheet is opened. This has to be settled before the interface board is drawn. See 12.3.
 
 ## 7. Digital I/O (items 5 and 6)
 
@@ -773,7 +816,8 @@ The +24 V and 0 V on COM are the PLC's own supply, brought in on two terminals. 
 - Supply filter, changed from Phase 0 (10 Ω and 100 nF): the Pico 2 W's regulator stays in its power-saving mode (6.1), whose ripple is at low frequencies, where 10 Ω and 100 nF do nothing. 100 Ω with 10 µF starts filtering at 160 Hz. The microphone draws about 1 mA [MIC s3], so the drop is 0.1 V; the supply stays far above the 1.62 V minimum [MIC s2] and the Pico's 3.3 V clock stays inside the microphone's input rating, which is 5 V for CLOCK regardless of VDD [MIC s2]. **[NOT VERIFIED]**: how much ripple the regulator really has, and whether the microphone's 0.7 x VDD logic-high level holds with VDD 0.1 V under the clock's high level (it should, since a lower VDD lowers the threshold). Bench item 44.
 - The 10 µF is a Class 2 ceramic. The datasheet says capacitors "near the microphone should not contain Class 2 dielectrics" [MIC s8], so it sits at the Pico end and the C0G part sits at the flex.
 - The 8.2 kΩ pull-down is new (3.4).
-- The flex's connector pin numbers are **[NOT VERIFIED]** (6.5).
+- **On the bench there are only jumper wires (fact 12)**, so the first tests run with no filter, no series resistor and no pull-down: 3V3(OUT) straight to the flex's power pad. That is inside the microphone's 1.62 to 3.6 V supply range [MIC s2]. Noise figures taken that way do not count. `docs/bench/README.md` has the pad-by-pad table.
+- Flex fingers, left to right with the metal can facing you: GND, VDD, DATA, CLOCK, SELECT, GND (6.5). Given by the owner; **[NOT VERIFIED]** on the board until bench item 46. The connector that takes the flex is not chosen yet (6.5).
 
 ### 7.5 Parts list
 
@@ -1001,6 +1045,7 @@ The second Pico's analyser firmware does not exist yet. It is a small step 3 del
 | 43 | A | **Heartbeat under load** (check b). Heartbeat service running, 10-minute link test with every core busy. On the CM5 and on the CM4, separately | the Pico's trip counter does not move |
 | 44 | C | **Regulator mode.** Noise floor with the normal build, and with the bench build that forces the quiet regulator mode (6.1) | recorded. If they differ by more than 1 dB in any band, the microphone supply gets its own regulator |
 | 45 | A | **Tach at the real tach voltage**, engine or rig turning | period readings steady; no extra or missing pulses over 1 minute |
+| 46 | A | **Flex pinout, before first power** (6.5). (a) Lift the lower edge of the sticker and read the six letters above the fingers. (b) If a multimeter is to hand: resistance between fingers 1 and 6, and between fingers 1 and 2. (c) First power-up with JP2 open, then the SELECT probe (item 37) | (a) G P D K S G, starting at the white dot. (b) 1 to 6 reads as a short; 1 to 2 does not. (c) the probe finds a live microphone. (a) and (c) are required; (b) is extra |
 
 **Item 38 in detail: measuring our own microphone.**
 
@@ -1043,7 +1088,7 @@ I need to know what your ultrasonic source is (model, or how it is driven) to sa
 | 11 | Unknown PLC | wrong wiring assumption | dry contacts with a jumper for either PLC type (7.4) |
 | 12 | Kernel on the current OS image | driver names may differ | checked on the target with `uname -r` at install |
 | 13 | **No instruments** | several limits unproven | accepted risks and their stand-ins, 10.4 |
-| 14 | Microphone board pinout unread | wrong wiring could damage the microphone | nothing is wired until the flex markings are read (6.5) |
+| 14 | Microphone board pinout comes from the owner and a picture of a similar board, not from this board's own sheet | wrong wiring, or a flex put in the wrong way round, could damage the microphone | bench item 46 before first power; finger 1 marked on the interface board; JP2 open at first power-up (6.5) |
 | 15 | Pico 2 W regulator stays in its noisier mode | supply ripple in the microphone signal | larger supply filter (7.4); bench item 44 |
 | 16 | Microphone and ADXL383 on different clocks | their signals drift apart by up to 0.5 ms per capture | only matters for cross-timing features; sync input available (8.5) |
 | 17 | The firmware's Pico layer (clock, pins, USB) compiles but has never run | step 2 will probably need fixes at first power-up | the logic is tested apart from that layer, which is kept thin; CI compiles it at every push; bench items 16 to 19 |
@@ -1067,6 +1112,8 @@ Operating system, for the record: the current release is Raspberry Pi OS (64-bit
 | D8 | Emergency-exit polarity | voltage present = healthy; disabled in configuration until wired | 7.1, 7.3 |
 | D9 | Four proposals from revision B | left to the author's judgement by the owner on 2026-11-21 ("do what would work"); all four kept as proposed: watchdog times 500 ms / 2 s; tach input good to roughly 1 kHz; the starting INVALID limits; a second Pico as the bench logic analyser. This is a go-ahead, not a measurement: the figures marked **[NOT VERIFIED]** stay so until their bench items run (39 for the INVALID limits) | 7.1, 7.2, 4.8, 10.1 |
 
+| D10 | Approvals | given 2026-11-22: "you dont have to ask my approval for anything hereafter do it if its right". So existing firmware files are changed without a separate yes, and work is committed and pushed to `rev-2` as it is done. Each change is still listed with its reason (13.3, `firmware/README.md`). It does not cover anything this document rules out: guessing hardware values, or claiming a test that was not run | everywhere |
+
 ### 12.2 Facts you gave (2026-11-21)
 
 | # | Fact | Effect |
@@ -1077,14 +1124,20 @@ Operating system, for the record: the current release is Raspberry Pi OS (64-bit
 | 4 | PLC and client unknown | dry-contact outputs, jumper for either PLC type (7.4) |
 | 5 | Touch screen: Waveshare 7 inch capacitive, believed 1024x600 | resolution comes from configuration; never hardcoded. **[NOT VERIFIED]**: the exact model and its resolution |
 | 6 | No scope, frequency counter or calibrator; all decisions relative to golden parts | bench checklist replanned (10) |
+| 7 | Given 2026-11-22: flex fingers left to right are Ground, Power, Data, Clock, Select, Ground; the left-hand board in the picture on page 4 of Knowles' selection guide is the one bought | pinout recorded, with what is still unproven (6.5); bench item 46 added |
+| 8 | Given 2026-11-22: sticker removed, the flex reads G-P-D-K-S-G left to right | item 46a done, by your reading (6.5) |
+| 9 | Given 2026-11-22: the flex will plug into a Sunrom "8P PCB with 0.5mm FFC Connector Soldered" | recorded with its three open questions (6.5); bench wiring in `docs/bench/README.md` |
+| 10 | Given 2026-11-22: two boards are to hand, a Pico 2 W and a Pico 2 | the Pico 2 W is the front end; the Pico 2 is the bench logic analyser (10.1) |
+| 11 | Given 2026-11-22: the breakout's pads are numbered 1 to 8; 2 ground, 3 power, 4 data, 5 clock, 6 select, 7 ground; 1 and 8 unused | wiring table by pad (6.5, `docs/bench/README.md`) |
+| 12 | Given 2026-11-22: only jumper wires on the bench. No resistors, capacitors or meter | the SELECT probe was changed so it needs no pull-down (3.4); first tests run without the supply filter (7.4) |
+| 13 | Given 2026-11-22: the CM5 is reached by SSH from the development Mac | its address and user name are still needed (12.3) |
 
 ### 12.3 Still needed from you
 
-None of these blocks step 2. Items 1 and 2 block wiring the microphone in step 3.
-
-1. **The microphone flex's pin markings.** The two photos sent on 2026-11-21 show six fingers and a sticker over the markings (6.5). Needed: the board's sheet downloaded by hand, or a photo with the sticker lifted.
-2. **What the ultrasonic source is** (model, or how it is driven), for bench item 38. The owner did not know on 2026-11-21, so this is parked: item 38 stays written for any source, and if no source exists one will be proposed, with its datasheet, when step 3 starts.
-3. **The ADXL383 evaluation board's exact part number and connector**, when the ADXL383 work starts.
+1. **The CM5's address and user name for SSH**, and a login that needs no typed password (an SSH key). No Raspberry Pi answered on the network on 2026-11-22.
+2. **Which way up the flex goes into the breakout's connector**: are the connector's contacts on the floor or the roof of the slot? The flex's gold side must face them.
+3. **What the ultrasonic source is** (model, or how it is driven), for bench item 38. The owner did not know on 2026-11-21, so this is parked: item 38 stays written for any source, and if no source exists one will be proposed, with its datasheet, when step 3 starts.
+4. **The ADXL383 evaluation board's exact part number and connector**, when the ADXL383 work starts.
 
 The four proposals that stood here were settled on 2026-11-21 (D9 in 12.1).
 
@@ -1126,7 +1179,7 @@ To check that the tests can fail, I broke the firmware logic five ways (watchdog
 
 - `scripts/selftest.sh` on Linux with Python 3.11.18 and with 3.13.18: 13 passed, none failed, 2 not run, both times. These are the same steps as on the laptop, against the same two stand-ins.
 - The Pico build: `firmware/` compiled and linked for the Pico 2 W (`PICO_BOARD=pico2_w`) with Pico SDK 2.1.1 and arm-none-eabi-gcc 13.2.1. It built at the first attempt and produced `eol_pico.uf2`, 67,584 bytes.
-- One compiler warning in our code: `main.c` line 16 defines `SYS_CLK_HZ`, a name the SDK already defines. Our code uses our value, 128 MHz, as intended. The fix is to rename ours; it waits for the owner's approval, as every change to an existing firmware file does.
+- One compiler warning in our code in that build: `main.c` line 16 defined `SYS_CLK_HZ`, a name the SDK already defines. The line was never used (the clock is set by the figures passed to `set_sys_clock_pll`), so it was removed on 2026-11-21 with the owner's approval. No behaviour changes. Not yet rebuilt in CI.
 
 **Compiling is not running.** A successful build shows the code is valid C that links against the SDK. It says nothing about whether the clock starts, the USB device appears, or a pin moves.
 
@@ -1139,13 +1192,55 @@ To check that the tests can fail, I broke the firmware logic five ways (watchdog
 - The pseudo-terminal stand-in is not USB. It proves the logic and the receiver. It says nothing about USB throughput, the two-port descriptor, or how Linux names the ports.
 - The microphone, the tach, Start, the real outputs and the ADXL383 are not in step 2 at all.
 
+### 13.3 Step 3, first part: microphone capture
+
+**What was added, 2026-11-22**
+
+| Part | Where |
+|---|---|
+| Microphone clock and capture on the Pico: one PIO program, one DMA channel writing a 32 kB ring for ever | `firmware/src/mic.pio`, `mic.c`, `mic.h` (new) |
+| Wake-up sequence, SELECT probe, real microphone frames, loss counting, restart-to-bootloader command | `firmware/src/core.c` |
+| Protocol 1.1: MIC_STATUS, MIC_OVERRUN, REBOOT, microphone options in STREAM_START | `protocol/README.md` |
+| CM5 microphone test, with band levels straight from the 1-bit stream | `link/eol_link/mictest.py`, `pdmspec.py` (new) |
+| A simulated microphone in both stand-ins, bit-for-bit the same in each | `simulator/pico_sim/`, `firmware/host/core_host.c` |
+
+**Existing firmware files changed, with the reason for each** (decision D10 replaced the separate approval):
+
+| File | Change | Reason |
+|---|---|---|
+| `firmware/CMakeLists.txt` | builds `mic.c` and `mic.pio`; links the PIO, DMA and bootrom libraries | the capture code has to be built |
+| `firmware/src/board.h` | comments only: the microphone pins are now in use | keeps the pin map true |
+| `firmware/src/hal.h` | microphone start, change-clock, stop and read; restart to bootloader | the core stays free of hardware calls, so it can be tested on a PC |
+| `firmware/src/proto.h` | protocol 1.1 constants; the three microphone clocks | the contract in `protocol/README.md` |
+| `firmware/src/core.h` | firmware version 0.3.0 | |
+| `firmware/src/core.c` | microphone stream (wake, settle, probe, run), MIC_STATUS, loss counting, REBOOT | the capture itself |
+| `firmware/src/main.c` | calls `mic_init()`; restart-to-bootloader call. Earlier the same day: the unused `SYS_CLK_HZ` line removed (13.2) | wires the new code in |
+| `firmware/host/core_host.c` | simulated microphone; prints the microphone clock | the same tests run on a PC |
+
+Not changed: `proto.c`, `usb_descriptors.c`, `tusb_config.h`.
+
+**Run on the laptop (macOS, Apple arm64), 2026-11-22:** `scripts/selftest.sh`: 15 steps passed, none failed, 2 not run. That is the 13 steps of step 2 plus a microphone test against each stand-in. Inside those steps:
+
+- 22 unit tests (16 before): the new messages' layout, and band levels from a 1-bit stream of known tones (within 0.5 dB and 50 Hz).
+- 50 system tests (30 before). The new ones run against the Python simulator and the firmware core built for the laptop: a microphone stream arrives and every bit equals the documented simulated signal; the clock goes 2.0 MHz, then 3.2 MHz, then off, never straight to 3.2 MHz; the probe names SELECT correctly for both settings with the released line holding, falling and rising (six cases); a dead line is reported and nothing is streamed; forcing the wrong half shows a dead line; the 4.0 MHz clock gives 8 ms frames; a device frozen for 150 ms mid-stream reports the loss, and the missing frames match its own count; arguments are checked; firmware without capture says so; the restart command needs the handshake and the magic word.
+
+To check that these tests can fail, I broke the firmware core on purpose. Of the first eight faults (probe verdict swapped; wrong half forwarded; bytes of each word swapped; one frame too many; dead line not refused; restart without the magic word; clock left running after a stop; lost capture data not reported) the tests caught six and missed the last two. I added a record of the microphone clock and a frozen-device test, then ran nine faults (the eight, plus the ultrasonic clock from the first moment). All nine were caught.
+
+**Not run, not tested**
+
+- **Nothing has run on a Pico, still.** `mic.pio` and `mic.c` are the part that touches the microphone, and neither stand-in runs them. They are compiled by CI and nothing more.
+- The PIO timing, the DMA ring, the clock change while running and the pad settings are from the SDK headers and the RP2350 datasheet, not from a working board. Expect fixes at first power-up.
+- No real microphone has been read. The simulated signal is square waves through a simple 1-bit modulator. It proves the plumbing, not the acoustics.
+- The band levels are relative figures. Nothing here measures sound pressure.
+- Not yet in step 3: the second-Pico logic analyser firmware, the tach sampler, and the decimation filter with selectable ratio.
+
 ## 14. Build plan
 
 | Step | Work | State |
 |---|---|---|
 | 1 | Phase 0 review (this document) | approved 2026-11-21; revision B adds the checks you asked for |
 | 2 | Pico firmware skeleton and CM5 receiver; link proof with synthetic data; simulator; first self-test | written; logic tested on a laptop and in CI; Pico build compiles in CI; never run on a Pico. **Ends when bench items 16 to 19 pass on your hardware** |
-| 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
+| 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | capture, probe and the CM5 microphone test are written and tested against simulated microphones (13.3); never run on a Pico. Analyser firmware and filter not started. Bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
 | 4 | Acquisition service and recording storage on the CM5 | a simulated and a real capture are stored and verified by hash |
 | 5 | Database and Setup screens | Setup flow works in the browser at both screen sizes |
 | 6 | Analysis catalogue and ML | cross-validated results on synthetic data; bench items 38 to 42 |

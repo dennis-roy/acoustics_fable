@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Self-test for build-plan step 2 (firmware skeleton, receiver, link proof).
 #
-#   scripts/selftest.sh              everything that needs no Pico (about 1.5 minutes)
+#   scripts/selftest.sh              everything that needs no Pico (about 2 minutes)
 #   scripts/selftest.sh --long       the same, with 10-minute link runs instead of 10 s
 #   scripts/selftest.sh --hardware   also the tests on a real Pico plugged into this machine
 #                                    (bench items 16 to 19; add --long for the 10-minute runs)
+#   scripts/selftest.sh --hardware --mic   also the microphone test, once the microphone is wired
 #
 # Every step ends as PASS, FAIL or NOT RUN. NOT RUN is never counted as a pass.
 # Exit code: 0 only if nothing failed.
@@ -20,10 +21,12 @@ mkdir -p "$BUILD"
 : > "$LOG"
 
 HARDWARE=0
+MIC=0
 SOAK=10
 for arg in "$@"; do
   case $arg in
     --hardware) HARDWARE=1 ;;
+    --mic) MIC=1 ;;
     --long) SOAK=600 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -76,6 +79,7 @@ device_checks() { # device_checks "label"
   # --min-rate 0: a stand-in's speed says nothing about USB, so only loss is judged here.
   run "$1: link, maximum rate, 5 s, zero loss" link linktest --seconds 5 --max-rate --min-rate 0
   run "$1: heartbeat watchdog logic" link wdtest
+  run "$1: microphone test, simulated microphone, 3 s" link mictest --seconds 3
 }
 
 echo "Self-test, step 2. Log: $LOG"
@@ -85,6 +89,9 @@ echo
 
 run "Python is 3.11 or newer" "$PY" -c 'import sys; sys.exit(sys.version_info < (3, 11))'
 run "unit tests: frame format, synthetic data, mic checks" "$PY" -m unittest discover -s link/tests
+if ! "$PY" -c 'import numpy' 2> /dev/null; then
+  notrun "band-level tests" "numpy is not installed here (on a Raspberry Pi: sudo apt install python3-numpy)"
+fi
 
 CORE_HOST=
 if command -v cc > /dev/null; then
@@ -130,6 +137,12 @@ if [ "$HARDWARE" = 1 ]; then
     run "Pico: real rate, ${SOAK} s, zero loss (bench item 17)" link linktest --seconds "$SOAK"
     run "Pico: same with every CPU core busy (bench item 18)" link linktest --seconds "$SOAK" --busy
     run "Pico: heartbeat watchdog logic" link wdtest
+    if [ "$MIC" = 1 ]; then
+      run "Pico: microphone test, 5 s (bench items 20 and 37)" link mictest --seconds 5
+      link mictest --seconds 5 | sed 's/^/    | /'
+    else
+      notrun "Pico: microphone test" "give --mic once the microphone is wired"
+    fi
     [ "$SOAK" -lt 600 ] && notrun "Pico: 10-minute runs for bench items 17 and 18" "give --long"
   else
     notrun "Pico: bench items 16 to 19" "no Pico found under /dev/serial/by-id/"

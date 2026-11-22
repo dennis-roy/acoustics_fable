@@ -15,6 +15,7 @@ PDF files are not committed (see `.gitignore`). Download them here when you need
 | `adxl383.pdf` | Analog Devices ADXL383 | Rev. 0, 106 pages | https://www.analog.com/media/en/technical-documentation/data-sheets/adxl383.pdf |
 | `pico-2-w-datasheet.pdf` | Raspberry Pi Pico 2 W | RP-008304-DS-4, Release 3, build 19/11/2026 | https://datasheets.raspberrypi.com/picow/pico-2-w-datasheet.pdf |
 | `vo14642a.pdf` | Vishay VO14642AT solid-state relay | doc 81646, Rev 1.9 | https://www.vishay.com/docs/81646/vo14642a.pdf |
+| `knowles_mic_selection_guide_v121222.pdf` | Knowles MEMS microphone selection guide (consumer); read for the flex picture and connector text on page 4 | KNO_MEMS MIC R5, (c) 2022, 4 pages. SHA-256 starts `fa39c61a077c3aa8` | supplied by hand on 2026-11-22; its web address was not recorded |
 | `KAS-700-0154_Brief.pdf` | Knowles KAS-700-0154 brief (a sibling flex board; read only for the flex connector) | (c) 2020 | https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/3668/KAS-700-0154_Brief.pdf |
 
 ## Manual downloads
@@ -22,4 +23,5 @@ PDF files are not committed (see `.gitignore`). Download them here when you need
 analog.com and knowles.com refuse automated downloads. Open such links in a browser and save the file here.
 
 - `adxl383.pdf` was supplied by hand on 2026-11-21 and is read (section 8 of the review).
-- **Still not opened:** any Knowles or Syntiant document for the microphone board KAS-700-0164 itself. Its connector pinout is unread (section 6.5 of the review). If you find its product brief, save it here as `KAS-700-0164_Brief.pdf` and say so.
+- `knowles_mic_selection_guide_v121222.pdf` was supplied by hand on 2026-11-22 and is read.
+- **Still not opened:** any Knowles or Syntiant document for the microphone board KAS-700-0164 itself, and Knowles' note AN18 on flex circuits. The pinout in section 6.5 of the review comes from the owner and from a picture in the selection guide. If you find the board's product brief or AN18, save it here and say so.

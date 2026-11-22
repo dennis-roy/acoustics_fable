@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #define EOL_FW_MAJOR 0
-#define EOL_FW_MINOR 2
+#define EOL_FW_MINOR 3
 #define EOL_FW_PATCH 0
 
 #ifndef EOL_BUILD_TAG

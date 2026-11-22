@@ -30,8 +30,11 @@ endif()
 add_executable(eol_pico
   src/main.c
   src/usb_descriptors.c
+  src/mic.c
   src/core.c
   src/proto.c)
+
+pico_generate_pio_header(eol_pico ${CMAKE_CURRENT_LIST_DIR}/src/mic.pio)
 
 target_include_directories(eol_pico PRIVATE src)
 target_compile_definitions(eol_pico PRIVATE EOL_BUILD_TAG="${EOL_BUILD_TAG}")
@@ -42,6 +45,9 @@ target_link_libraries(eol_pico
   pico_unique_id
   hardware_clocks
   hardware_watchdog
+  hardware_pio
+  hardware_dma
+  pico_bootrom
   tinyusb_device
   tinyusb_board)
 

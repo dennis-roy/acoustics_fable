@@ -83,5 +83,25 @@ class SynthTests(unittest.TestCase):
         self.assertEqual(len({src.payload(p.T_PDM, i) for i in range(100)}), 100)
 
 
+class MicrophoneMessageTests(unittest.TestCase):
+    def test_stream_start_layout(self):
+        self.assertEqual(p.pack_stream_start(p.SRC_MIC, p.MODE_REAL, 0, 500, clock=1, select=p.MIC_USE_H),
+                         bytes([1, 0, 1, 2, 0, 0, 0, 0, 0xF4, 1, 0, 0]))
+        # Without the microphone options the two bytes are zero, as protocol 1.0 had them.
+        self.assertEqual(p.pack_stream_start(p.SRC_SYNTH, p.MODE_MAX, 7, 0)[2:4], b"\0\0")
+
+    def test_mic_status_round_trip_and_layout(self):
+        status = p.MicStatus(p.MIC_SELECT_VDD, p.MIC_USE_H, True, 1, 4_000_000, 100_000, 11, 22, 33, 44, 55, 66)
+        payload = p.pack_mic_status(status)
+        self.assertEqual(len(payload), 40)
+        self.assertEqual(payload[:4], bytes([2, 2, 1, 1]))
+        self.assertEqual(struct.unpack_from("<8I", payload, 4), (4_000_000, 100_000, 11, 22, 33, 44, 55, 66))
+        self.assertEqual(p.unpack_mic_status(payload), status)
+        self.assertIn("VDD", status.verdict_name)
+
+    def test_reboot_payload_is_the_word_boot(self):
+        self.assertEqual(p.pack_reboot(), b"BOOT")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,11 +9,12 @@
 #include "hardware/clocks.h"
 #include "hardware/gpio.h"
 #include "hardware/watchdog.h"
+#include "mic.h"
+#include "pico/bootrom.h"
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
 #include "tusb.h"
 
-#define SYS_CLK_HZ 128000000u
 #define HW_WATCHDOG_MS 1000u
 
 static uint32_t fc_sys_khz;
@@ -34,6 +35,11 @@ uint32_t hal_sys_clk_hz(void) { return clock_get_hz(clk_sys); }
 uint32_t hal_fc_sys_khz(void) { return fc_sys_khz; }
 uint8_t hal_board_id(void) { return EOL_BOARD_PICO2_W; }
 
+void hal_reboot_to_bootloader(void)
+{
+    reset_usb_boot(0, 0); /* does not return: the chip restarts as a USB drive */
+}
+
 static void board_init(void)
 {
     /* Outputs first: low = every contact open. Pads are isolated until now. */
@@ -53,6 +59,7 @@ static void board_init(void)
     printf("eol_pico %d.%d.%d (%s) clk_sys=%lu Hz, counted %lu kHz\n", EOL_FW_MAJOR, EOL_FW_MINOR,
            EOL_FW_PATCH, EOL_BUILD_TAG, (unsigned long)clock_get_hz(clk_sys),
            (unsigned long)fc_sys_khz);
+    mic_init();
 }
 
 static void pump_rx(uint64_t now)

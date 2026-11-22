@@ -1,0 +1,20 @@
+; Microphone clock and capture for the SPH0641LU4H-1.
+; Why it looks like this: docs/phase0/PHASE0_HARDWARE_DESIGN_REVIEW.md, sections 3.4 and 5.
+;
+; One state machine, two instructions per clock period. The clock divider is the length
+; of half a period in system clock cycles, so the clock is 50 % by construction.
+;
+; The data line is read at BOTH edges. An input passes through a two-stage synchroniser,
+; so each read shows the line two system clock cycles before the edge: the end of the
+; half that is just finishing. Which of the two reads carries the data depends on the
+; microphone's SELECT pin, and the firmware core works that out from the samples.
+;
+; NOT TESTED ON HARDWARE.
+
+.program mic_capture
+.side_set 1
+
+.wrap_target
+    in pins, 1   side 1   ; clock rises.  "L": the line at the end of the low half
+    in pins, 1   side 0   ; clock falls.  "H": the line at the end of the high half
+.wrap

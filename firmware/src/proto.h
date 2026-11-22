@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 #define EOL_PROTO_MAJOR 1
-#define EOL_PROTO_MINOR 0
+#define EOL_PROTO_MINOR 1
 
 #define EOL_HDR_LEN 24u
 #define EOL_CRC_LEN 4u
@@ -14,6 +14,14 @@
 #define EOL_PDM_PAYLOAD 4000u /* 10 ms at 3.2 Mbit/s */
 #define EOL_TACH_PAYLOAD 250u /* 10 ms at 200 kbit/s */
 #define EOL_HB_TIMEOUT_MS 500u
+#define EOL_MIC_STATUS_LEN 40u
+#define EOL_REBOOT_MAGIC 0x544F4F42u /* the bytes "BOOT" */
+
+/* Microphone clocks, review section 5.2. STREAM_START picks 0 or 1; the wake-up clock
+   always runs first. Each must divide the system clock by an even whole number. */
+#define EOL_MIC_WAKE_HZ 2000000u
+#define EOL_MIC_CLOCK_0_HZ 3200000u
+#define EOL_MIC_CLOCK_1_HZ 4000000u
 
 enum {
     EOL_T_INFO = 0x01,
@@ -22,12 +30,14 @@ enum {
     EOL_T_EVENT = 0x04,
     EOL_T_STATS = 0x05,
     EOL_T_ACK = 0x06,
+    EOL_T_MIC_STATUS = 0x07,
     EOL_T_HB_STATUS = 0x10,
     EOL_T_HELLO = 0x81,
     EOL_T_STREAM_START = 0x82,
     EOL_T_STREAM_STOP = 0x83,
     EOL_T_SET_OUTPUTS = 0x84,
     EOL_T_GET_STATS = 0x85,
+    EOL_T_REBOOT = 0x86,
     EOL_T_HEARTBEAT = 0x90,
 };
 
@@ -48,9 +58,20 @@ enum {
     EOL_EV_TX_OVERFLOW = 3,
     EOL_EV_WATCHDOG_TRIP = 4,
     EOL_EV_WATCHDOG_OK = 5,
+    EOL_EV_MIC_OVERRUN = 6,
 };
 
 enum { EOL_WD_HB_TIMEOUT = 1, EOL_WD_APP_DEAD = 2 };
+
+/* What the SELECT probe found (MIC_STATUS), and which half of the clock is forwarded. */
+enum {
+    EOL_MIC_NOT_PROBED = 0,
+    EOL_MIC_SELECT_GND = 1, /* data valid in the low half: read at the rising edge */
+    EOL_MIC_SELECT_VDD = 2, /* data valid in the high half: read at the falling edge */
+    EOL_MIC_STUCK = 3,      /* the line never changes: no microphone, no power or no clock */
+    EOL_MIC_AMBIGUOUS = 4,  /* changes, but fits neither setting */
+};
+enum { EOL_MIC_USE_NONE = 0, EOL_MIC_USE_L = 1, EOL_MIC_USE_H = 2 };
 
 /* Output mask bits. Bit 5 is driven by the firmware only. */
 enum {

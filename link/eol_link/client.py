@@ -96,6 +96,10 @@ class PicoLink:
     def set_outputs(self, mask: int) -> None:
         self.command(p.T_SET_OUTPUTS, p.pack_set_outputs(mask))
 
+    def reboot_to_bootloader(self) -> None:
+        """The Pico restarts as a USB drive, ready for new firmware. Its serial ports vanish."""
+        self.command(p.T_REBOOT, p.pack_reboot())
+
     def get_stats(self) -> p.Stats:
         self.command(p.T_GET_STATS)
         # The Pico queues the STATS frame just before the ACK, so it is the newest one here.

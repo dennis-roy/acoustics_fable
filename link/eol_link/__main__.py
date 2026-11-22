@@ -1,4 +1,4 @@
-"""Command line: python3 -m eol_link {info,linktest,wdtest,heartbeat}"""
+"""Command line: python3 -m eol_link {info,linktest,mictest,wdtest,heartbeat,bootloader}"""
 
 from __future__ import annotations
 
@@ -8,8 +8,9 @@ import os
 import sys
 
 from . import protocol as p
-from .client import PicoLink, VersionMismatch
+from .client import CommandFailed, PicoLink, VersionMismatch
 from .heartbeat import HeartbeatDaemon, make_realtime
+from . import mictest
 from .linktest import CpuLoad, format_result, run_linktest
 from .transport import Port, find_ports
 from .wdtest import run_wdtest
@@ -42,6 +43,7 @@ def cmd_info(args) -> int:
         print(f"serial           {info.unique_id}")
         print(f"system clock     {info.sys_clk_hz} Hz configured, {info.fc_sys_khz} kHz counted")
         print(f"watchdog timeout {info.hb_timeout_ms} ms")
+        print(f"microphone       {'capture built in' if info.features & p.FEATURE_MIC else 'not in this firmware'}")
     print(f"handshake        {verdict}")
     return 0 if verdict == "accepted" else 1
 
@@ -61,6 +63,41 @@ def cmd_linktest(args) -> int:
             result = run_linktest(link, args.seconds, mode, min_max_rate=args.min_rate * 1000)
     print(format_result(result))
     return 0 if result.passed else 1
+
+
+def cmd_mictest(args) -> int:
+    data_port, _ = _ports(args)
+    with Port(data_port) as port:
+        link = PicoLink(port)
+        try:
+            info = link.hello()
+        except VersionMismatch as exc:
+            print(f"REFUSED: {exc}")
+            return 1
+        print(f"Connected to {info.board_name}, firmware {info.fw_version}")
+        select = {"auto": 0, "rising": p.MIC_USE_L, "falling": p.MIC_USE_H}[args.read]
+        try:
+            result = mictest.run_mictest(link, args.seconds, clock=p.MIC_CLOCKS_HZ.index(round(args.clock * 1e6)),
+                                         select=select, save_dir=args.save, mic_id=args.mic_id)
+        except CommandFailed as exc:
+            print(f"RESULT           FAIL\n  - {exc}")
+            return 1
+    print(mictest.format_result(result))
+    return 0 if result.passed else 1
+
+
+def cmd_bootloader(args) -> int:
+    data_port, _ = _ports(args)
+    with Port(data_port) as port:
+        link = PicoLink(port)
+        try:
+            link.hello()
+        except VersionMismatch as exc:
+            print(f"REFUSED: {exc}")
+            return 1
+        link.reboot_to_bootloader()
+    print("The Pico is restarting as a USB drive. Copy the new eol_pico.uf2 onto it.")
+    return 0
 
 
 def cmd_wdtest(args) -> int:
@@ -107,6 +144,18 @@ def main() -> int:
                     help="what --max-rate must reach, in kB/s (default 650; use 0 with a simulator)")
     lt.add_argument("--busy", action="store_true", help="load every CPU core meanwhile (bench item 18)")
     lt.set_defaults(fn=cmd_linktest)
+
+    mt = sub.add_parser("mictest", help="capture from the microphone and check the stream")
+    mt.add_argument("--seconds", type=float, default=5.0)
+    mt.add_argument("--clock", type=float, default=3.2, choices=[3.2, 4.0], metavar="MHZ",
+                    help="microphone clock: 3.2 (default) or 4.0")
+    mt.add_argument("--read", default="auto", choices=["auto", "rising", "falling"],
+                    help="which clock edge to read at; auto lets the Pico find out (default)")
+    mt.add_argument("--save", metavar="DIR", help="keep the raw 1-bit stream there, with its SHA-256")
+    mt.add_argument("--mic-id", default="", help="written into the saved description")
+    mt.set_defaults(fn=cmd_mictest)
+
+    sub.add_parser("bootloader", help="restart the Pico as a USB drive, for new firmware").set_defaults(fn=cmd_bootloader)
 
     sub.add_parser("wdtest", help="check the heartbeat watchdog through the Pico's own reports").set_defaults(fn=cmd_wdtest)
 

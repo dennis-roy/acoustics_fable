@@ -10,7 +10,8 @@ Work happens on branch `rev-2`.
 |---|---|---|
 | 1 | Hardware design review (Phase 0) | approved 2026-11-21, revision B |
 | 2 | Pico firmware skeleton, CM5 receiver, link proof with synthetic data, simulator, first self-test | **written; logic tested on a laptop and in CI; Pico build compiles in CI; never run on a Pico or a CM5** |
-| 3 to 11 | Microphone capture, storage, database, analysis, UI, I/O, reports, install | not started |
+| 3 | Microphone clock and capture, SELECT probe, microphone test | **capture, probe and test written; tested against simulated microphones; never run on a Pico.** Logic analyser firmware and filter not started |
+| 4 to 11 | Storage, database, analysis, UI, I/O, reports, install | not started |
 
 **Nothing in this repository has been verified on hardware.** Each module's README says exactly what was run and where.
 
@@ -38,6 +39,7 @@ Work happens on branch `rev-2`.
 | `link/` | `README.md`: the CM5-side tools |
 | `simulator/` | `README.md`: running without a Pico |
 | `scripts/` | `README.md`: the self-test |
+| `docs/bench/` | `README.md`: setting up the CM5, flashing the Pico, wiring the microphone on the bench |
 
 ## Quick check, no hardware
 
@@ -48,10 +50,10 @@ git checkout rev-2
 scripts/selftest.sh
 ```
 
-Needs Python 3.11 or newer. Takes about 1.5 minutes. Expected last line:
+Needs Python 3.11 or newer. Takes about 2 minutes. Expected last line:
 
 ```
-PASS 13   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)
+PASS 15   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)
 ```
 
 ## First run on the real hardware

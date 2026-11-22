@@ -30,7 +30,7 @@ static struct {
     bool port_open, hello_ok;
 
     bool streaming;
-    uint8_t mode;
+    uint8_t src, mode;
     uint64_t t0, next_due;
     uint32_t duration_us, seed;
     uint32_t gen[2], dropped[2];
@@ -44,8 +44,9 @@ static struct {
     uint32_t hb_count, wd_trips;
     uint8_t requested, actual;
 
-    uint32_t seq_info, seq_event, seq_stats, seq_ack, seq_hb;
+    uint32_t seq_info, seq_event, seq_stats, seq_ack, seq_hb, seq_mic;
     uint32_t ring_high;
+    uint64_t reboot_at;
 } st;
 
 /* ---- transmit ring ---- */
@@ -130,7 +131,8 @@ static void send_info(void)
     hal_unique_id(p + 16);
     eol_put_u16(p + 24, EOL_PDM_PAYLOAD);
     eol_put_u16(p + 26, EOL_TACH_PAYLOAD);
-    eol_put_u32(p + 28, 0x1u | 0x8u); /* synthetic source, outputs. Mic and tach come in step 3 */
+    /* bit 0 synthetic source, bit 1 microphone, bit 3 outputs. Tach (bit 2) is not built yet. */
+    eol_put_u32(p + 28, 0x1u | (hal_mic_available() ? 0x2u : 0u) | 0x8u);
     strncpy((char *)p + 32, EOL_BUILD_TAG, 15);
     emit_small(EOL_T_INFO, &st.seq_info, p, sizeof p);
 }
@@ -212,9 +214,198 @@ static void stream_frame(int kind, uint64_t t_us)
     }
 }
 
+/* ---- microphone stream ---- */
+
+#define MIC_WAKE_US 100000u       /* standard-mode clock first, review section 3.2 */
+#define MIC_SETTLE_US 20000u      /* a mode change takes 10 ms at most [MIC s3] */
+#define MIC_PROBE_PERIODS 100000u /* about 31 ms at 3.2 MHz */
+#define MIC_CHUNK_WORDS 256u
+#define MIC_CHUNKS_PER_POLL 32
+#define MIC_WORDS_PER_FRAME (EOL_PDM_PAYLOAD / 2u)
+
+enum { MIC_WAKE, MIC_SETTLE, MIC_PROBE, MIC_RUN };
+
+static uint8_t micbuf[EOL_PDM_PAYLOAD];
+
+static struct {
+    uint8_t phase, clock_code, forced, use, verdict;
+    uint32_t clock_hz, frame_us, frames_target, fill;
+    uint64_t t_phase, t_run;
+    uint32_t periods, ones_l, ones_h, lh_10, lh_01, hl_10, hl_01;
+} mic;
+
+/* Bits 0, 2, 4 ... 30 of x, packed into 16 bits in the same order. */
+static uint32_t even_bits(uint32_t x)
+{
+    x &= 0x55555555u;
+    x = (x | (x >> 1)) & 0x33333333u;
+    x = (x | (x >> 2)) & 0x0F0F0F0Fu;
+    x = (x | (x >> 4)) & 0x00FF00FFu;
+    x = (x | (x >> 8)) & 0x0000FFFFu;
+    return x;
+}
+
+static uint32_t pop(uint32_t x) { return (uint32_t)__builtin_popcount(x); }
+
+/* One raw word into the probe's counters. In l and h, bit 15 is the earliest period. */
+static void probe_word(uint32_t w)
+{
+    uint32_t l = even_bits(w >> 1), h = even_bits(w);
+    uint32_t l_next = (l << 1) & 0xFFFEu; /* L of the following period, lined up with H */
+    mic.periods += 16;
+    mic.ones_l += pop(l);
+    mic.ones_h += pop(h);
+    mic.lh_10 += pop(l & ~h & 0xFFFFu);
+    mic.lh_01 += pop(~l & h & 0xFFFFu);
+    mic.hl_10 += pop(h & ~l_next & 0xFFFEu);
+    mic.hl_01 += pop(~h & l_next & 0xFFFEu);
+}
+
+static uint32_t min_u32(uint32_t a, uint32_t b) { return a < b ? a : b; }
+
+/* Which half of the clock carries the data? (protocol/README.md, "The SELECT probe")
+
+   The microphone drives the line in one half of the period and lets go in the other.
+   Two samples of the SAME bit (driven, then released) can differ in one direction only:
+   the direction the released line drifts in. Two samples either side of a bit boundary
+   differ in both directions. So the pairing whose smaller count is about zero is the
+   same-bit pairing. */
+static uint8_t probe_verdict(void)
+{
+    uint32_t n = mic.periods, small = n / 64u, large = n / 16u;
+    uint32_t same_if_gnd = min_u32(mic.lh_10, mic.lh_01); /* L then H is one bit if SELECT = GND */
+    uint32_t same_if_vdd = min_u32(mic.hl_10, mic.hl_01); /* H then next L is one bit if VDD */
+
+    if (same_if_gnd < small && same_if_vdd >= large) return EOL_MIC_SELECT_GND;
+    if (same_if_vdd < small && same_if_gnd >= large) return EOL_MIC_SELECT_VDD;
+    if (same_if_gnd < small && same_if_vdd < small) {
+        /* Either nothing moves at all, or the released half always falls back to one
+           level. In the second case the half that still varies is the data. */
+        bool l_alive = mic.ones_l > n / 8u && mic.ones_l < n - n / 8u;
+        bool h_alive = mic.ones_h > n / 8u && mic.ones_h < n - n / 8u;
+        if (l_alive && !h_alive) return EOL_MIC_SELECT_GND;
+        if (h_alive && !l_alive) return EOL_MIC_SELECT_VDD;
+        return EOL_MIC_STUCK;
+    }
+    return EOL_MIC_AMBIGUOUS;
+}
+
+static void send_mic_status(void)
+{
+    uint8_t p[EOL_MIC_STATUS_LEN] = {mic.verdict, mic.use, mic.forced ? 1 : 0, mic.clock_code};
+    eol_put_u32(p + 4, mic.clock_hz);
+    eol_put_u32(p + 8, mic.periods);
+    eol_put_u32(p + 12, mic.ones_l);
+    eol_put_u32(p + 16, mic.ones_h);
+    eol_put_u32(p + 20, mic.lh_10);
+    eol_put_u32(p + 24, mic.lh_01);
+    eol_put_u32(p + 28, mic.hl_10);
+    eol_put_u32(p + 32, mic.hl_01);
+    emit_small(EOL_T_MIC_STATUS, &st.seq_mic, p, sizeof p);
+}
+
+static void stream_stop(void);
+
+static void mic_frame(void)
+{
+    uint32_t n = st.gen[PDM]++;
+    uint8_t flags = st.gap[PDM] ? EOL_F_GAP : 0;
+    if (emit(EOL_T_PDM, flags, n, mic.t_run + (uint64_t)n * mic.frame_us, micbuf, EOL_PDM_PAYLOAD,
+             NULL, 0, true)) {
+        st.gap[PDM] = false;
+    } else {
+        st.gap[PDM] = true;
+        st.dropped[PDM]++;
+        st.ovf_unreported++;
+    }
+    mic.fill = 0;
+}
+
+/* The capture fell behind and raw words were overwritten. Count the frames that went
+   with them, so the frame numbers show the hole. */
+static void mic_lost(uint32_t lost_words)
+{
+    uint32_t frames = (mic.fill / 2u + lost_words + MIC_WORDS_PER_FRAME - 1u) / MIC_WORDS_PER_FRAME;
+    if (mic.frames_target && frames > mic.frames_target - st.gen[PDM])
+        frames = mic.frames_target - st.gen[PDM]; /* never count past the end of the capture */
+    st.gen[PDM] += frames;
+    st.dropped[PDM] += frames;
+    st.ovf_unreported += frames;
+    st.gap[PDM] = true;
+    mic.fill = 0;
+    send_event(EOL_EV_MIC_OVERRUN, lost_words);
+}
+
+static void mic_start(const uint8_t *p, uint32_t duration_ms)
+{
+    memset(&mic, 0, sizeof mic);
+    mic.clock_code = p[2];
+    mic.forced = p[3];
+    mic.clock_hz = p[2] ? EOL_MIC_CLOCK_1_HZ : EOL_MIC_CLOCK_0_HZ;
+    mic.frame_us = (uint32_t)((uint64_t)EOL_PDM_PAYLOAD * 8u * 1000000u / mic.clock_hz);
+    mic.frames_target = (uint32_t)((uint64_t)duration_ms * 1000u / mic.frame_us);
+    mic.phase = MIC_WAKE;
+    mic.t_phase = st.now;
+    hal_mic_start(EOL_MIC_WAKE_HZ); /* never straight into the ultrasonic clock [MIC s5] */
+}
+
+static void mic_poll(void)
+{
+    uint32_t words[MIC_CHUNK_WORDS], lost;
+
+    for (int chunk = 0; chunk < MIC_CHUNKS_PER_POLL && st.streaming; chunk++) {
+        size_t n = hal_mic_read(words, MIC_CHUNK_WORDS, &lost);
+        if (lost && mic.phase == MIC_RUN) {
+            mic_lost(lost);
+            if (mic.frames_target && st.gen[PDM] >= mic.frames_target) stream_stop();
+        }
+        if (n == 0) break;
+
+        if (mic.phase == MIC_PROBE) {
+            for (size_t i = 0; i < n; i++) probe_word(words[i]);
+        } else if (mic.phase == MIC_RUN) {
+            for (size_t i = 0; i < n && st.streaming; i++) {
+                uint32_t v = mic.use == EOL_MIC_USE_H ? even_bits(words[i]) : even_bits(words[i] >> 1);
+                micbuf[mic.fill++] = (uint8_t)(v >> 8);
+                micbuf[mic.fill++] = (uint8_t)v;
+                if (mic.fill < EOL_PDM_PAYLOAD) continue;
+                mic_frame();
+                if (mic.frames_target && st.gen[PDM] >= mic.frames_target) stream_stop();
+            }
+        } /* MIC_WAKE and MIC_SETTLE: read and thrown away */
+    }
+    if (!st.streaming) return;
+
+    if (mic.phase == MIC_WAKE && st.now - mic.t_phase >= MIC_WAKE_US) {
+        hal_mic_set_clock(mic.clock_hz);
+        mic.phase = MIC_SETTLE;
+        mic.t_phase = st.now;
+    } else if (mic.phase == MIC_SETTLE && st.now - mic.t_phase >= MIC_SETTLE_US) {
+        mic.phase = MIC_PROBE;
+    } else if (mic.phase == MIC_PROBE && mic.periods >= MIC_PROBE_PERIODS) {
+        mic.verdict = probe_verdict();
+        if (mic.forced)
+            mic.use = mic.forced; /* bench override: stream that half whatever the probe says */
+        else if (mic.verdict == EOL_MIC_SELECT_GND)
+            mic.use = EOL_MIC_USE_L;
+        else if (mic.verdict == EOL_MIC_SELECT_VDD)
+            mic.use = EOL_MIC_USE_H;
+        send_mic_status();
+        if (mic.use == EOL_MIC_USE_NONE) {
+            stream_stop(); /* no microphone to listen to */
+            return;
+        }
+        mic.phase = MIC_RUN;
+        mic.t_run = st.now;
+    }
+}
+
+/* ---- both kinds of stream ---- */
+
 static void stream_stop(void)
 {
     if (!st.streaming) return;
+    if (st.src == SRC_MIC) hal_mic_stop();
     st.streaming = false;
     send_event(EOL_EV_STREAM_STOPPED, st.gen[PDM]);
 }
@@ -224,7 +415,9 @@ static void stream_poll(void)
     if (!st.streaming) return;
     bool timed_out = st.duration_us && (st.now - st.t0) >= st.duration_us;
 
-    if (st.mode == MODE_REAL) {
+    if (st.src == SRC_MIC) {
+        mic_poll();
+    } else if (st.mode == MODE_REAL) {
         uint64_t limit = timed_out ? st.t0 + st.duration_us : st.now;
         for (int i = 0; i < MAX_FRAMES_PER_POLL && st.next_due < limit; i++) {
             stream_frame(PDM, st.next_due);
@@ -252,20 +445,29 @@ static uint8_t cmd_stream_start(const uint8_t *p, uint16_t len)
 {
     if (!st.hello_ok) return EOL_ST_BAD_VERSION;
     if (len < 12 || p[1] > MODE_MAX) return EOL_ST_BAD_ARG;
-    if (p[0] == SRC_MIC) return EOL_ST_NOT_IMPLEMENTED;
-    if (p[0] != SRC_SYNTH) return EOL_ST_BAD_ARG;
+    if (p[0] == SRC_MIC) {
+        if (!hal_mic_available()) return EOL_ST_NOT_IMPLEMENTED;
+        /* p[2] clock: 0 or 1. p[3] which half to read: 0 = find out, 1 = L, 2 = H. */
+        if (p[1] != MODE_REAL || p[2] > 1 || p[3] > EOL_MIC_USE_H) return EOL_ST_BAD_ARG;
+    } else if (p[0] != SRC_SYNTH) {
+        return EOL_ST_BAD_ARG;
+    }
     if (st.streaming) return EOL_ST_BUSY;
 
     st.mode = p[1];
     st.seed = eol_get_u32(p + 4);
     uint32_t duration_ms = eol_get_u32(p + 8);
     if (duration_ms > 3600000u) return EOL_ST_BAD_ARG; /* 1 hour; keeps the microsecond count in 32 bits */
-    st.duration_us = duration_ms * 1000u;
-    build_pattern(st.seed);
+    st.src = p[0];
+    st.duration_us = st.src == SRC_MIC ? 0 : duration_ms * 1000u; /* the microphone counts frames */
     st.gen[PDM] = st.gen[TACH] = 0;
     st.gap[PDM] = st.gap[TACH] = false;
     st.t0 = st.next_due = st.now;
     st.streaming = true;
+    if (st.src == SRC_MIC)
+        mic_start(p, duration_ms);
+    else
+        build_pattern(st.seed);
     return EOL_ST_OK;
 }
 
@@ -303,11 +505,20 @@ static void on_data_frame(void *ctx, uint8_t type, uint32_t seq, const uint8_t *
     case EOL_T_GET_STATS:
         send_stats();
         break;
+    case EOL_T_REBOOT:
+        if (!st.hello_ok)
+            status = EOL_ST_BAD_VERSION;
+        else if (len < 4 || eol_get_u32(p) != EOL_REBOOT_MAGIC)
+            status = EOL_ST_BAD_ARG;
+        else
+            st.reboot_at = st.now + 100000u; /* after the ACK has gone out */
+        break;
     default:
         return; /* unknown types are ignored, with no ACK */
     }
     send_ack(type, seq, status);
-    if (type == EOL_T_STREAM_START && status == EOL_ST_OK) send_event(EOL_EV_STREAM_STARTED, st.seed);
+    if (type == EOL_T_STREAM_START && status == EOL_ST_OK)
+        send_event(EOL_EV_STREAM_STARTED, st.src == SRC_MIC ? mic.clock_hz : st.seed);
 }
 
 static void on_hb_frame(void *ctx, uint8_t type, uint32_t seq, const uint8_t *p, uint16_t len)
@@ -353,6 +564,13 @@ void core_poll(uint64_t now_us)
     st.now = now_us;
     safety_update();
     stream_poll();
+    if (st.reboot_at && st.now >= st.reboot_at) {
+        st.reboot_at = 0;
+        if (st.streaming && st.src == SRC_MIC) hal_mic_stop();
+        st.streaming = false;
+        hal_set_outputs(0);
+        hal_reboot_to_bootloader();
+    }
     if (st.port_open && (st.now - st.last_stats) >= STATS_PERIOD_US &&
         (ring_head - ring_tail) <= STATS_BACKLOG_LIMIT)
         send_stats();
@@ -376,6 +594,7 @@ void core_data_port_open(uint64_t now_us, bool open)
     if (open == st.port_open) return;
     st.port_open = open;
     st.hello_ok = false;
+    if (st.streaming && st.src == SRC_MIC) hal_mic_stop();
     st.streaming = false;
     st.requested = 0;
     ring_tail = ring_head; /* discard anything queued for the old connection */
