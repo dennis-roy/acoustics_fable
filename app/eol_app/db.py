@@ -25,6 +25,7 @@ SETTINGS = [
     ("golden_samples", "int", "10", 1, 25, 1, "", "Golden OK samples to collect per part"),
     ("validation_every", "int", "5", 2, 10, 1, "", "Every Nth sample goes to the validation set; the rest train"),
     ("peak_threshold", "float", "0.7", 0.1, 1.0, 0.05, "", "Analysis: peaks above this share of the tallest are listed with their decay times"),
+    ("gain_limit_db", "float", "6", 1, 12, 0.5, "dB", "Calibration fails if the golden-relative gain is outside plus or minus this"),
     ("lockout_attempts", "int", "5", 3, 10, 1, "", "Wrong passwords in a row before an account locks"),
     ("lockout_minutes", "int", "15", 1, 240, 1, "min", "How long a locked account stays locked"),
     ("session_idle_minutes", "int", "480", 5, 1440, 5, "min", "Log out after this long without activity"),

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Testing: choose the part</h1>
+<div class="grid">{% for p in parts %}
+<form method="post" action="{{ url_for('testing_select', part_id=p['id']) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+<button class="big" {% if not p['model'] %}disabled title="No approved model"{% endif %}>{{ p['part_number'] }}<br>
+<span style="font-size:15px;font-weight:400">{{ p['description'] }}{% if not p['model'] %} (no approved model){% endif %}</span></button></form>
+{% else %}<p class="muted">No parts. Create them in Setup.</p>{% endfor %}</div>
+{% endblock %}

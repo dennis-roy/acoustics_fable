@@ -1350,6 +1350,36 @@ A fault found on the way: the first version of the self-test stopped only the sh
 - The screens on the real touch screen: no desktop or browser is installed on the CM5 yet (step 11).
 - Training models from the samples: step 6.
 
+### 13.7 Steps 6 to 8: analysis and models, Testing, users and reports (software)
+
+**What was added, 2026-11-22**
+
+| Part | Where |
+|---|---|
+| Analysis catalogue: 15 analyses, about 190 features, plug-in registry, versioned | `analysis/eol_analysis/catalogue.py` |
+| Golden-relative gain: reference from the Golden OK samples, ±6 dB limit | `analysis/eol_analysis/gain.py` |
+| Models: golden envelope (Mahalanobis + residual), isolation forest, kNN, SVM, gradient boosting; safety-first decision; drift; grouped cross-validation; pruning inside each fold | `analysis/eol_analysis/ml.py` |
+| Training, approval with pruning, method order; model files checked against their SHA-256 before loading | `app/eol_app/training.py`, `model_views.py` |
+| Testing: calibration gate (Golden OK must pass, Reject must fail), test loop, results without raw data, PLC outputs through the Pico with the heartbeat | `app/eol_app/testing_views.py`; the acquisition service keeps the Pico link open and gained `fetch` and `set_outputs` |
+| Reports: yield, retests, Pareto, by operator and shift, UNDEFINED and drift logs, calibrations, model history; CSV; print to PDF; shifts | `app/eol_app/report_views.py` |
+| Operator work instructions with the standards they follow | `docs/operator/README.md` |
+
+**Found by the tests and fixed:**
+
+1. **An escape.** A synthetic fault that moved one feature by 47 standard deviations, in a direction good parts never vary in, passed as OK. The golden envelope measured distance only inside the PCA subspace of normal variation. Now it also measures the residual off that subspace, and both must be small. The test was widened from 3 to 20 such parts, with zero allowed to pass. My first test, with 3 parts, had happened to miss it.
+2. **False rejects** from the isolation forest with about 10 golden samples. Its threshold is now leave-one-out, and it is off by default.
+3. The repetition rate of impacts was read as a harmonic (45 instead of 15 per second); it now comes from the envelope's autocorrelation.
+4. On the CM5, the envelope analysis took 80 % of the time; polyphase resampling made the catalogue 3 times faster (3.6 s to 1.2 s for 10 s).
+
+**Run on the laptop:** analysis 20 tests, application 18 tests; `scripts/selftest.sh` 19 passed, none failed, 2 not run. Deliberate faults: 6 in the models, all caught. **On the CM5:** the catalogue on real bench recordings, 1.2 s for 10 s of capture, plus 0.74 s for the filter (4.7).
+
+**Not run, not tested**
+
+- **No model has been trained on real parts.** All model figures are from synthetic parts. The real escape and false-reject rates will come from Setup samples of real Golden OK and failure-mode parts.
+- The Testing flow ran end to end with the simulator and a stand-in model, not with a model trained on real parts.
+- The PLC outputs: the logic is tested (refused without a heartbeat, accepted with one, in the simulator); there is no interface board, so no output has switched anything.
+- Start from the Pico's input, tach capture, licence binding, network dashboard, edge clients: not built.
+
 ## 14. Build plan
 
 | Step | Work | State |
@@ -1359,9 +1389,9 @@ A fault found on the way: the first version of the self-test stopped only the sh
 | 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | capture, probe and the CM5 microphone test written; **a real microphone was read on 2026-11-22**: probe, quiet-room and sound checks pass; bench items 20, 37 and 46 done (13.3). **Decimation filter built and run on real captures** (13.4). Analyser firmware and tach sampler not started. Bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
 | 4 | Acquisition service and recording storage on the CM5 | **done 2026-11-22**: a simulated and a real capture are stored and verified by hash (13.5) |
 | 5 | Database and Setup screens | **done 2026-11-22**, except checking by eye on the touch screen (needs step 11): Setup works end to end with the real microphone (13.6) |
-| 6 | Analysis catalogue and ML | cross-validated results on synthetic data; bench items 38 to 42 |
-| 7 | Testing and calibration flow; interface board and DIO | bench items 12, 13, 28 to 35, 43, 45 |
-| 8 | Users, login, reports | |
+| 6 | Analysis catalogue and ML | **software done 2026-11-22**: cross-validated results on synthetic data (13.7). Bench items 38 to 42 need real parts |
+| 7 | Testing and calibration flow; interface board and DIO | **Testing flow done in software** (13.7); interface board, Start input and tach not built; bench items 12, 13, 28 to 35, 43, 45 open |
+| 8 | Users, login, reports | **done in software** (13.6, 13.7); licence binding, network dashboard and edge clients not built |
 | 9 | Mando suspension application | |
 | 10 | Ashok Leyland engine application (tach, order tracking) | |
 | 11 | Documentation set, install scripts, full self-test | fresh-machine install passes `selftest.sh` |

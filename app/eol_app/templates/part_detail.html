@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block body %}
 <div class="row"><h1 style="flex:1">{{ part['part_number'] }} <span class="muted">{{ part['description'] }}</span></h1>
+<a class="button" href="{{ url_for('models_page', part_id=part['id']) }}">Models</a>
 <a class="button secondary" href="{{ url_for('setup_parts') }}">All parts</a></div>
 <div class="grid">
 <div class="card"><h2>Record samples</h2>

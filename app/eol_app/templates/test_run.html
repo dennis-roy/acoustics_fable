@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>{{ part['part_number'] }}: testing <span class="muted">calibrated, gain {{ '%.3f' % gain }}</span></h1>
+<div class="grid">
+<div class="card">
+  <ol><li>Scan or type the unit's serial.</li><li>Put the part in the fixture and run it.</li><li>Press Test.</li></ol>
+  <form method="post" onsubmit="go.disabled=true;go.textContent='Testing…'"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Unit serial / barcode</label><input name="unit_serial" maxlength="40" autofocus autocomplete="off">
+    <label><input type="checkbox" name="retest" value="1" {% if not last %}disabled{% endif %}>This is a retest of the last part</label>
+    <p><button id="go" class="big">Test</button></p></form>
+  <a class="button secondary" href="{{ url_for('testing_home') }}">Change part (needs a new calibration)</a>
+</div>
+<div class="card">{% include "_verdict.html" %}{% if not result %}<p class="muted">Ready for the next part.</p>{% endif %}</div>
+</div>
+{% endblock %}

@@ -19,6 +19,7 @@ def main() -> int:
     sv.add_argument("--host", default="127.0.0.1", help="127.0.0.1 = this machine only (default); 0.0.0.0 = the network too")
     sv.add_argument("--port", type=int, default=8080)
     sv.add_argument("--acquire-socket", default=None, help=f"acquisition service socket (default {acquire_socket()})")
+    sv.add_argument("--heartbeat-socket", default=None, help="heartbeat process socket (default <run dir>/heartbeat.sock)")
     sub.add_parser("migrate", help="create or update the database, then stop")
     sub.add_parser("reset-master", help="give the master login a new temporary password (recovery; needs a shell on the CM5)")
     sub.add_parser("info", help="database file, schema version, counts")
@@ -27,7 +28,8 @@ def main() -> int:
 
     if args.cmd == "serve":
         from .web import create_app
-        app = create_app(db_path, args.acquire_socket)
+        from eol_acquire.paths import run_dir
+        app = create_app(db_path, args.acquire_socket, heartbeat_socket=args.heartbeat_socket or run_dir() / "heartbeat.sock")
         try:
             from waitress import serve
         except ImportError:

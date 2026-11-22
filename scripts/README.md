@@ -38,7 +38,7 @@ With `--hardware` it also runs bench items 16 to 19 from the Phase 0 review on t
 Expected last line on a machine with a C compiler and no Pico:
 
 ```
-PASS 17   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)
+PASS 19   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)
 ```
 
 With `--hardware --mic` on the CM5 with the Pico and microphone, it was `PASS 26   FAIL 0   NOT RUN 2` on 2026-11-22. That run also captures through the acquisition service, saves the capture in `build/acquire-selftest/` and verifies it by its SHA-256.

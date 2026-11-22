@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="row"><h1 style="flex:1">{{ part['part_number'] }}: models</h1>
+<a class="button secondary" href="{{ url_for('part_detail', part_id=part['id']) }}">Back to the part</a></div>
+{% if job and job['state'] == 'running' %}<meta http-equiv="refresh" content="3">
+<div class="card"><b>Training…</b> {{ job['message'] }}</div>
+{% elif job %}<div class="card">Last training: <b>{{ job['state'] }}</b>. {{ job['message'] }}</div>{% endif %}
+<div class="card">
+  <form method="post" action="{{ url_for('models_train', part_id=part['id']) }}"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <button {% if job and job['state'] == 'running' %}disabled{% endif %}>Train from the current samples</button></form>
+  <p class="muted">Needs at least 5 Golden OK and 3 samples per failure mode in the training set. Training uses the training set;
+  the validation set is kept apart and judged afterwards.</p>
+</div>
+<h2>Versions</h2>
+{% for v in versions %}{% set cv = v.metrics.get('cross_validation', {}) %}{% set va = v.metrics.get('validation', {}) %}
+<div class="card">
+  <div class="row"><b style="flex:1">Version {{ v['version'] }}: {{ v['state'] }}</b>
+  {% if v['state'] == 'trained' and can('programming') %}
+  <form method="post" action="{{ url_for('models_approve', part_id=part['id'], version=v['version']) }}"
+        onsubmit="return confirm('Approve version {{ v['version'] }} for testing?')"><input type="hidden" name="csrf" value="{{ csrf }}">
+  <button>Approve</button></form>{% endif %}</div>
+  <p>Trained {{ v['trained_utc'] }}{% if v['approved_utc'] %}, approved {{ v['approved_utc'] }}{% endif %}.
+     Classes: {{ v.metrics.get('classes', [])|join(', ') }}. Training samples: {{ v.metrics.get('training_samples') }}.</p>
+  <table>
+  <tr><th></th><th>Escape rate (NOK passed as OK)</th><th>False-reject rate (OK not passed)</th><th>Right failure mode</th></tr>
+  <tr><td>Cross-validation ({{ cv.get('folds', 0) }} folds, grouped by unit)</td>
+    {% if cv.get('folds') %}<td>{{ '%.1f %%' % (100 * cv['escape_rate']) if cv['escape_rate'] is not none else '—' }} ({{ cv['escapes'] }})</td>
+    <td>{{ '%.1f %%' % (100 * cv['false_reject_rate']) if cv['false_reject_rate'] is not none else '—' }} ({{ cv['false_rejects'] }})</td>
+    <td>{{ '%.0f %%' % (100 * cv['right_mode_rate']) if cv['right_mode_rate'] is not none else '—' }}</td>
+    {% else %}<td colspan="3">{{ cv.get('note', '') }}</td>{% endif %}</tr>
+  <tr><td>Validation set ({{ va.get('samples', 0) }} samples)</td><td>{{ va.get('escapes', '—') }} of {{ va.get('nok_samples', 0) }}</td>
+    <td>{{ va.get('false_rejects', '—') }} of {{ va.get('ok_samples', 0) }}</td><td>{{ va.get('right_mode', '—') }} of {{ va.get('nok_samples', 0) }}</td></tr>
+  </table>
+  {% if v.prune.get('pruned') %}<p>Analyses that do not help separate Good from any failure mode, pruned on approval:
+     <b>{{ v.prune['pruned']|join(', ') }}</b></p>{% elif v.prune.get('note') %}<p class="muted">{{ v.prune['note'] }}</p>{% endif %}
+  {% if v.prune.get('best_d_by_analysis') %}<details><summary>Selection report</summary><table>
+    {% for a, d in v.prune['best_d_by_analysis'].items() %}<tr><td>{{ a }}</td><td>{{ d }} standard deviations</td></tr>{% endfor %}</table></details>{% endif %}
+</div>
+{% else %}<p class="muted">No model yet.</p>{% endfor %}
+<h2>Method order</h2>
+<div class="card">
+<p class="muted">Every enabled method can veto a PASS. When a part is not OK, the first method in this order that names a failure mode
+(and the part is inside that mode's envelope) gives the reported mode. The golden envelope is always on.</p>
+<form method="post" action="{{ url_for('models_priority', part_id=part['id']) }}" id="pf"><input type="hidden" name="csrf" value="{{ csrf }}">
+<input type="hidden" name="order" id="order">
+<table id="pt">{% for p in priority %}<tr data-m="{{ p['method'] }}"><td><b>{{ p['method'] }}</b></td>
+<td><label><input type="checkbox" name="enabled" value="{{ p['method'] }}" {% if p['enabled'] %}checked{% endif %}
+  {% if p['method'] in locked %}disabled checked{% endif %}>enabled</label></td>
+<td><button type="button" class="small secondary" onclick="mv(this,-1)">Up</button>
+<button type="button" class="small secondary" onclick="mv(this,1)">Down</button></td></tr>{% endfor %}</table>
+{% if can('programming') %}<p><button onclick="order.value=[...pt.rows].map(r=>r.dataset.m).join(',')">Save order</button></p>{% endif %}
+</form></div>
+{% endblock %}
+{% block script %}<script>
+function mv(b,d){const r=b.closest('tr'),t=r.parentNode;if(d<0&&r.previousElementSibling)t.insertBefore(r,r.previousElementSibling);
+if(d>0&&r.nextElementSibling)t.insertBefore(r.nextElementSibling,r);}
+</script>{% endblock %}

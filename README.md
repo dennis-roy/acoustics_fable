@@ -13,7 +13,10 @@ Work happens on branch `rev-2`.
 | 3 | Microphone clock and capture, SELECT probe, microphone test | **capture, probe, test and decimation filter written; a real microphone was read on 2026-11-22 and responds to sound.** Logic analyser firmware and tach sampler not started |
 | 4 | Acquisition service and recording storage | **done 2026-11-22**: a real capture stored and verified by hash on the CM5 |
 | 5 | Database and Setup screens | **done 2026-11-22**: Setup captures and saves samples from the real microphone through the web screen |
-| 6 to 11 | Analysis and ML, Testing flow, reports, applications, install | not started |
+| 6 | Analysis catalogue and models | **software done**: tested on synthetic parts; no model trained on real parts yet |
+| 7 | Testing and calibration flow | **software done**: calibration gate, results without raw data, PLC outputs through the Pico; interface board not built |
+| 8 | Users, login, reports | **done in software** |
+| 9 to 11 | Mando and Ashok Leyland applications, install scripts and services | see the review's build plan |
 
 **Verified on hardware so far** (Pico 2 W, CM5 and the KAS-700-0164 microphone, 2026-11-22): the USB link, the watchdog logic, and microphone capture with relative sound checks. Absolute levels are not measured. Each module's README says exactly what was run and where.
 
@@ -30,7 +33,8 @@ Work happens on branch `rev-2`.
  simulator/   a Pico in software, for working without hardware
  dsp/         the decimation filter: 1-bit stream to 200 kHz samples
  acquire/     the acquisition service: captures, INVALID checks, permanent recordings
- app/         the application: database, login, Setup and Programming screens
+ app/         the application: database, login, Setup, models, Testing, reports
+ analysis/    the analysis catalogue, golden gain and the models that decide OK / NOK
  scripts/     selftest.sh
  tests/       system tests: receiver against the simulator and against the firmware's logic
  docs/        the design review, the calculations behind it, datasheet links
@@ -45,7 +49,9 @@ Work happens on branch `rev-2`.
 | `simulator/` | `README.md`: running without a Pico |
 | `dsp/` | `README.md`: the decimation filter, its versions, how to make a WAV file from a capture |
 | `acquire/` | `README.md`: the acquisition service and the recording store |
-| `app/` | `README.md`: logins, Setup, programming variables, how to run it |
+| `app/` | `README.md`: logins, Setup, models, Testing, reports, how to run it |
+| `analysis/` | `README.md`: every analysis, the gain, the models and the decision rule |
+| `docs/operator/` | `README.md`: operator work instructions |
 | `docs/database/` | `README.md`: every table and column |
 | `docs/decisions/` | why the bigger choices were made |
 | `scripts/` | `README.md`: the self-test |
@@ -63,7 +69,7 @@ scripts/selftest.sh
 Needs Python 3.11 or newer, with numpy and scipy for all steps to run. Takes about 2 minutes. Expected last line:
 
 ```
-PASS 17   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)
+PASS 19   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)
 ```
 
 ## First run on the real hardware

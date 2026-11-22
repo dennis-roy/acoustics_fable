@@ -13,7 +13,7 @@
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-export PYTHONPATH="$ROOT/link:$ROOT/simulator:$ROOT/dsp:$ROOT/acquire:$ROOT/app"
+export PYTHONPATH="$ROOT/link:$ROOT/simulator:$ROOT/dsp:$ROOT/acquire:$ROOT/app:$ROOT/analysis"
 PY=${PYTHON:-python3}
 BUILD=$ROOT/build
 LOG=$BUILD/selftest.log
@@ -117,10 +117,11 @@ fi
 if "$PY" -c 'import numpy, scipy' 2> /dev/null; then
   run "decimation filter: coefficients, response, timing, aliasing" "$PY" -m unittest discover -s dsp/tests
   run "acquisition and recording store (simulator)" "$PY" -m unittest discover -s acquire/tests
-  if "$PY" -c 'import flask' 2> /dev/null; then
-    run "application: database, login, Setup (simulator)" "$PY" -m unittest discover -s app/tests
+  if "$PY" -c 'import flask, sklearn' 2> /dev/null; then
+    run "analysis catalogue, golden gain, models (synthetic parts)" env PYTHONPATH="$PYTHONPATH:$ROOT/analysis/tests" "$PY" -m unittest discover -s analysis/tests
+    run "application: database, Setup, training, Testing, reports" "$PY" -m unittest discover -s app/tests
   else
-    notrun "application tests" "Flask is not installed (pip install -r requirements.txt, see app/README.md)"
+    notrun "analysis and application tests" "Flask or scikit-learn is not installed (pip install -r requirements.txt, see app/README.md)"
   fi
 else
   notrun "decimation filter and acquisition tests" "numpy or scipy is not installed (sudo apt install python3-numpy python3-scipy)"

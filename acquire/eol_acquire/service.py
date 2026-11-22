@@ -14,9 +14,14 @@ and production parts are never saved: there is no purpose for them.
 Requests and replies are one JSON object per line. Every reply has "ok"; a refused
 request has "ok": false and "error". See ../README.md for the list.
 
-It opens the Pico's port only during a capture, so other tools can use the Pico between
-captures. (When Start comes to the Pico in step 7, the service will keep the port open
-to hear it.)
+It keeps the Pico's data port open while it runs: the Pico forgets requested outputs
+whenever that port closes (a safety rule, protocol/README.md), so outputs can only be
+held by a program that keeps it open. Stop the service before using other tools on the
+Pico (eol_link mictest, scripts/selftest.sh --hardware).
+
+Testing (production parts): "fetch" hands the raw bytes of the waiting capture to the
+application over this socket, in memory only, so it can be analysed; then "discard".
+Nothing of it is written to disk.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ import logging
 import os
 import secrets
 import socketserver
+import threading
 from dataclasses import asdict
 from pathlib import Path
 
@@ -58,6 +64,9 @@ class AcquisitionService:
         self.limits = limits
         self.software = software_version()
         self._pending: tuple[str, MicCapture, Evaluation] | None = None
+        self._port: Port | None = None
+        self._link: PicoLink | None = None
+        self.ready = threading.Event()  # set once the socket accepts connections
 
     # ---- requests ----
 
@@ -65,13 +74,14 @@ class AcquisitionService:
         try:
             cmd = req.get("cmd")
             fn = {"status": self._status, "capture": self._capture, "save": self._save,
-                  "discard": self._discard}.get(cmd)
+                  "discard": self._discard, "set_outputs": self._set_outputs}.get(cmd)
             if fn is None:
                 raise RequestError(f"unknown command {cmd!r}")
             return {"ok": True, **fn(req)}
         except (RequestError, StoreError, VersionMismatch, CommandFailed, TimeoutError) as exc:
             return {"ok": False, "error": str(exc)}
         except (LinkLost, OSError) as exc:
+            self._drop_link()
             return {"ok": False, "error": f"Pico link: {exc}"}
         except Exception as exc:  # a fault here must answer the request, not drop it
             log.exception("request %r failed", req.get("cmd"))
@@ -82,13 +92,38 @@ class AcquisitionService:
                 "microphone_id": self.microphone_id, "decimation": self.decimation, "preroll_s": self.preroll_s,
                 "limits": asdict(self.limits), "software": self.software, "recordings": len(self.store.descriptions())}
 
-    def _port(self) -> str:
+    def _port_path(self) -> str:
         if self.data_port:
             return self.data_port
         found = find_ports()
         if not found:
             raise RequestError("no Pico found under /dev/serial/by-id/")
         return found[0]
+
+    def link(self) -> PicoLink:
+        """The open link to the Pico, opened (with the version handshake) on first use and after a loss."""
+        if self._link is None:
+            self._port = Port(self._port_path())
+            try:
+                link = PicoLink(self._port)
+                link.hello()
+            except BaseException:
+                self._drop_link()
+                raise
+            self._link = link
+        return self._link
+
+    def _drop_link(self) -> None:
+        if self._port is not None:
+            self._port.close()
+        self._port = self._link = None
+
+    def _set_outputs(self, req: dict) -> dict:
+        mask = req.get("mask")
+        if not isinstance(mask, int) or not 0 <= mask <= 0x1F:
+            raise RequestError("mask must be a whole number from 0 to 31 (bits: OK, NOK, UNDEFINED, READY, BUSY)")
+        self.link().set_outputs(mask)
+        return {"mask": mask}
 
     def _capture(self, req: dict) -> dict:
         seconds = req.get("seconds")
@@ -99,13 +134,10 @@ class AcquisitionService:
         if clock_mhz not in clocks:
             raise RequestError(f"clock_mhz must be one of {clocks}")
         self._pending = None  # an unsaved capture is dropped as soon as a new one starts
-        with Port(self._port()) as port:
-            link = PicoLink(port)
-            link.hello()
-            try:
-                cap = capture_mic(link, float(seconds), preroll_s=self.preroll_s, clock=clocks.index(clock_mhz))
-            except ValueError as exc:
-                raise RequestError(str(exc)) from exc
+        try:
+            cap = capture_mic(self.link(), float(seconds), preroll_s=self.preroll_s, clock=clocks.index(clock_mhz))
+        except ValueError as exc:
+            raise RequestError(str(exc)) from exc
         ev = evaluate(cap, self.limits, self.decimation)
         capture_id = secrets.token_hex(6)
         self._pending = (capture_id, cap, ev)
@@ -148,25 +180,40 @@ class AcquisitionService:
         class Handler(socketserver.StreamRequestHandler):
             def handle(self) -> None:
                 for line in self.rfile:
+                    raw = b""
                     try:
                         req = json.loads(line)
-                        reply = service.handle(req) if isinstance(req, dict) else {"ok": False, "error": "not an object"}
+                        if isinstance(req, dict) and req.get("cmd") == "fetch":
+                            reply, raw = service.fetch(req)
+                        else:
+                            reply = service.handle(req) if isinstance(req, dict) else {"ok": False, "error": "not an object"}
                     except ValueError:
                         reply = {"ok": False, "error": "not JSON"}
                     self.wfile.write((json.dumps(reply) + "\n").encode())
+                    self.wfile.write(raw)
                     self.wfile.flush()
 
         with socketserver.UnixStreamServer(str(socket_path), Handler) as server:
             os.chmod(socket_path, 0o660)
             self._server = server
+            self.ready.set()
             log.info("listening on %s; recordings in %s", socket_path, self.store.root)
             try:
                 server.serve_forever()
             finally:
                 socket_path.unlink(missing_ok=True)
 
+    def fetch(self, req: dict) -> tuple[dict, bytes]:
+        """The raw bytes of the waiting capture, for analysis in memory. Reply line, then the bytes."""
+        try:
+            capture_id, cap, _ = self._take(req)
+        except RequestError as exc:
+            return {"ok": False, "error": str(exc)}, b""
+        return {"ok": True, "capture_id": capture_id, "bytes": len(cap.raw), "clock_hz": cap.clock_hz}, cap.raw
+
     def shutdown(self) -> None:
         self._server.shutdown()
+        self._drop_link()
 
 
 def summary(capture_id: str, cap: MicCapture, ev: Evaluation) -> dict:

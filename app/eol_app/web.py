@@ -25,7 +25,8 @@ AREAS = {"setup": {"programming", "setup"}, "testing": {"programming", "setup", 
          "programming": {"programming"}}
 
 
-def create_app(db_path: str | Path, acquire_socket: str | Path | None = None, secure_cookie: bool = False) -> Flask:
+def create_app(db_path: str | Path, acquire_socket: str | Path | None = None, secure_cookie: bool = False,
+               heartbeat_socket: str | Path | None = None) -> Flask:
     app = Flask(__name__)
     app.secret_key = _secret_key(Path(db_path))
     app.config.update(DB_PATH=str(db_path), ACQUIRE_SOCKET=str(acquire_socket) if acquire_socket else None,
@@ -68,12 +69,45 @@ def create_app(db_path: str | Path, acquire_socket: str | Path | None = None, se
                 "station": station["name"] if station else "", "has": lambda endpoint: endpoint in app.view_functions,
                 "can": lambda area: bool(g.get("user")) and g.user["role"] in AREAS[area]}
 
+    if heartbeat_socket:
+        _start_checkin(app, Path(heartbeat_socket))
+
     register_auth(app)
     from .setup_views import register_setup
     from .admin_views import register_admin
+    from .model_views import register_models
+    from .testing_views import register_testing
+    from .report_views import register_reports
+    register_reports(app)
     register_setup(app)
     register_admin(app)
+    register_models(app)
+    register_testing(app)
     return app
+
+
+def _start_checkin(app: Flask, sock: Path) -> None:
+    """Tells the heartbeat process every 0.25 s that the application is alive. If check-ins stop
+    for 2 s, the Pico opens every output (link/eol_link/heartbeat.py). This proves the process
+    runs; it does not prove every screen responds."""
+    import threading
+    import time as _time
+
+    from eol_link.heartbeat import APP_CHECKIN_PERIOD_S, AppLiveness
+
+    def loop():
+        liveness, warned = AppLiveness(str(sock)), False
+        while True:
+            if liveness.beat():
+                warned = False
+                _time.sleep(APP_CHECKIN_PERIOD_S)
+            else:
+                if not warned:
+                    app.logger.warning("no heartbeat process at %s: the Pico keeps its outputs open", sock)
+                    warned = True
+                _time.sleep(2)
+
+    threading.Thread(target=loop, name="heartbeat-checkin", daemon=True).start()
 
 
 def _secret_key(db_path: Path) -> bytes:

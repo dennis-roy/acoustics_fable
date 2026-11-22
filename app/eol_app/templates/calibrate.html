@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>{{ part['part_number'] }}: calibration</h1>
+<div class="grid">
+<div class="card">
+  <h2>Step {{ 1 if step == 'golden' else 2 }} of 2: {{ 'Golden OK part' if step == 'golden' else 'known Reject part' }}</h2>
+  <ol>
+    <li>Put the {{ 'Golden OK' if step == 'golden' else 'known Reject' }} part in the fixture. Use the marked reference part only.</li>
+    <li>Run it as for a normal test.</li>
+    <li>Press Test. {{ 'It must PASS; it also sets the gain.' if step == 'golden' else 'It must FAIL.' }}</li>
+  </ol>
+  {% if gain %}<p>Gain from the golden part: <b>{{ '%.3f' % gain }}</b></p>{% endif %}
+  <form method="post" onsubmit="go.disabled=true;go.textContent='Testing…'"><input type="hidden" name="csrf" value="{{ csrf }}">
+    <button id="go" class="big">Test {{ 'Golden OK' if step == 'golden' else 'Reject' }}</button></form>
+  <a class="button secondary" href="{{ url_for('testing_home') }}">Choose another part</a>
+</div>
+<div class="card">{% include "_verdict.html" %}{% if not result %}<p class="muted">Testing is blocked until both checks are done.</p>{% endif %}</div>
+</div>
+{% endblock %}

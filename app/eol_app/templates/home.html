@@ -4,9 +4,11 @@
 <div class="grid">
   {% if can('testing') and has('testing_home') %}<a class="button big" href="{{ url_for('testing_home') }}">Testing</a>{% endif %}
   {% if can('setup') %}<a class="button big" href="{{ url_for('setup_parts') }}">Setup</a>{% endif %}
+  <a class="button big secondary" href="{{ url_for('reports') }}">Reports</a>
   {% if can('programming') %}<a class="button big secondary" href="{{ url_for('admin_users') }}">Users</a>
   <a class="button big secondary" href="{{ url_for('admin_settings') }}">Programming variables</a>
-  <a class="button big secondary" href="{{ url_for('admin_audit') }}">Audit log</a>{% endif %}
+  <a class="button big secondary" href="{{ url_for('admin_audit') }}">Audit log</a>
+  <a class="button big secondary" href="{{ url_for('admin_shifts') }}">Shifts</a>{% endif %}
   <a class="button big secondary" href="{{ url_for('password') }}">Change my password</a>
 </div>
 {% endblock %}

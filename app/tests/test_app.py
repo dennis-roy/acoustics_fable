@@ -8,7 +8,6 @@ import re
 import sqlite3
 import tempfile
 import threading
-import time
 import unittest
 from pathlib import Path
 
@@ -95,10 +94,7 @@ class WebTests(unittest.TestCase):
         self.service = AcquisitionService(RecordingStore(d / "data"), microphone_id="sim mic", data_port=self.sim.data_path)
         self.sock = Path(tempfile.mkdtemp(dir="/tmp")) / "acq.sock"
         threading.Thread(target=self.service.serve, args=(self.sock,), daemon=True).start()
-        for _ in range(200):
-            if self.sock.exists():
-                break
-            time.sleep(0.01)
+        self.assertTrue(self.service.ready.wait(5))
         self.addCleanup(self.service.shutdown)
         self.db_path = d / "eol.sqlite3"
         self.app = create_app(self.db_path, self.sock)

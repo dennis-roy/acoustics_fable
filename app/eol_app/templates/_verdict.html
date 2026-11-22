@@ -1,0 +1,10 @@
+{% if result %}
+{% set colour = {'OK': 'var(--ok)', 'NOK': 'var(--bad)', 'UNDEFINED': '#5b2a86', 'INVALID': '#444'}[result['verdict']] %}
+<div class="verdict" style="background:{{ colour }}">
+  {% if result['verdict'] == 'NOK' %}NOK: {{ result['failure_mode'] }}{% elif result['verdict'] == 'UNDEFINED' %}UNDEFINED PRODUCT{% else %}{{ result['verdict'] }}{% endif %}
+</div>
+{% if result['drift'] %}<div class="verdict" style="background:#e3b505;color:#222;font-size:24px;margin-top:6px">CONTROLLED DRIFT</div>{% endif %}
+<ul>{% for r in result['reasons'] %}<li>{{ r }}</li>{% endfor %}</ul>
+{% if result['outputs'] %}<p class="flash">PLC outputs were not set: {{ result['outputs'] }}</p>{% endif %}
+<p class="muted">Result {{ result['id'] }}{% if result['gain'] %}, gain {{ '%.3f' % result['gain'] }}{% endif %}{% if result.get('analysis_s') %}, analysis {{ result['analysis_s'] }} s{% endif %}.</p>
+{% endif %}

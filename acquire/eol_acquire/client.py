@@ -45,5 +45,26 @@ class AcquireClient:
         return self.request({"cmd": "save", "capture_id": capture_id, "purpose": purpose, "part": part,
                              "failure_mode": failure_mode, "note": note})["recording"]
 
+    def fetch(self, capture_id: str) -> tuple[bytes, int]:
+        """(raw bytes, clock in Hz) of the waiting capture, held in memory only."""
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(self._timeout)
+                s.connect(self._path)
+                s.sendall((json.dumps({"cmd": "fetch", "capture_id": capture_id}) + "\n").encode())
+                f = s.makefile("rb")
+                head = json.loads(f.readline() or b"{}")
+                if not head.get("ok"):
+                    raise AcquireError(head.get("error", "refused"))
+                raw = f.read(head["bytes"])
+        except OSError as exc:
+            raise AcquireError(f"cannot reach the acquisition service at {self._path}: {exc}") from None
+        if len(raw) != head["bytes"]:
+            raise AcquireError("the capture arrived incomplete")
+        return raw, head["clock_hz"]
+
+    def set_outputs(self, mask: int) -> dict:
+        return self.request({"cmd": "set_outputs", "mask": mask})
+
     def discard(self, capture_id: str) -> dict:
         return self.request({"cmd": "discard", "capture_id": capture_id})

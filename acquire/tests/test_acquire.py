@@ -280,17 +280,57 @@ class ServiceTests(unittest.TestCase):
     def test_firmware_without_capture_and_a_missing_pico_are_reported(self):
         self.start(mic=None)
         self.refused({"cmd": "capture", "seconds": 1}, "no microphone capture")
-        self.service.data_port = "/dev/does-not-exist"
+        self.service = AcquisitionService(self.store, microphone_id="sim mic", data_port="/dev/does-not-exist")
         self.refused({"cmd": "capture", "seconds": 1}, "Pico link")
+
+    def test_fetch_hands_over_the_raw_capture_without_writing_it(self):
+        service = self.start()
+        sock = Path(tempfile.mkdtemp(dir="/tmp")) / "acquire.sock"
+        threading.Thread(target=service.serve, args=(sock,), daemon=True).start()
+        self.assertTrue(service.ready.wait(5))
+        self.addCleanup(service.shutdown)
+        client = AcquireClient(sock)
+        cap = client.capture(0.5)
+        raw, clock = client.fetch(cap["capture_id"])
+        self.assertEqual((len(raw), clock), (200_000, 3_200_000))
+        self.assertEqual(raw, micsig.stream(50 * p.PDM_PAYLOAD, 200_000))
+        client.discard(cap["capture_id"])
+        self.assertEqual(list(self.store.root.parent.rglob("*.pdm")), [], "nothing written to disk")
+
+    def test_outputs_need_a_healthy_heartbeat_and_then_follow_the_command(self):
+        from eol_link.heartbeat import AppLiveness, HeartbeatDaemon
+        sim = PicoSim().start()
+        self.addCleanup(sim.stop)
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        self.service = AcquisitionService(RecordingStore(d.name), microphone_id="sim mic", data_port=sim.data_path)
+        self.refused({"cmd": "set_outputs", "mask": p.OUT_OK}, "SAFE_STATE")
+        hb_sock = os.path.join(d.name, "hb.sock")
+        daemon = HeartbeatDaemon(sim.hb_path, hb_sock)
+        hb_thread = threading.Thread(target=daemon.run, daemon=True)
+        hb_thread.start()
+        self.addCleanup(hb_thread.join, 5)
+        self.addCleanup(daemon.stop)
+        while not os.path.exists(hb_sock):
+            time.sleep(0.01)
+        app = AppLiveness(hb_sock)
+        self.addCleanup(app.close)
+        deadline = time.monotonic() + 3
+        while not daemon.pico_healthy and time.monotonic() < deadline:
+            app.beat()
+            time.sleep(0.05)
+        self.ok({"cmd": "set_outputs", "mask": p.OUT_OK | p.OUT_READY})
+        time.sleep(0.05)
+        self.assertEqual(sim.outputs & 0x1F, p.OUT_OK | p.OUT_READY)
+        self.refused({"cmd": "set_outputs", "mask": 99}, "mask")
+        self.refused({"cmd": "set_outputs", "mask": p.OUT_OK | p.OUT_NOK}, "BAD_ARG")
 
     def test_over_the_socket(self):
         service = self.start()
         sock = Path(tempfile.mkdtemp(dir="/tmp")) / "acquire.sock"
         self.addCleanup(lambda: sock.parent.rmdir() if sock.parent.exists() and not any(sock.parent.iterdir()) else None)
         threading.Thread(target=service.serve, args=(sock,), daemon=True).start()
-        deadline = time.monotonic() + 5
-        while not sock.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
+        self.assertTrue(service.ready.wait(5))
         self.addCleanup(service.shutdown)
         client = AcquireClient(sock)
         self.assertEqual(client.status()["microphone_id"], "sim mic")

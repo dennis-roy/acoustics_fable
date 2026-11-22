@@ -34,4 +34,5 @@ th { color: var(--muted); font-weight: 600; font-size: 15px; }
 .stepper button { min-width: 52px; }
 .progress { font-size: 20px; font-weight: 700; }
 code { font-size: 14px; word-break: break-all; }
+@media print { header, form, .noprint { display: none !important; } body { background: #fff; } .card { border: 0; } }
 @media (max-width: 1100px) { body { font-size: 16px; } h1 { font-size: 21px; } }

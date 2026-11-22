@@ -42,7 +42,7 @@ scripts/selftest.sh
 
 - `python3 --version` must say 3.11 or newer.
 - `groups` must include `dialout`. That group may open serial ports. If it is missing: `sudo usermod -aG dialout $USER`, then log out and in again. **[NOT VERIFIED]** whether the Raspberry Pi OS default user is in it.
-- `scripts/selftest.sh` needs no Pico and takes about 2 minutes. Expected last line: `PASS 17   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)`.
+- `scripts/selftest.sh` needs no Pico and takes about 2 minutes. Expected last line: `PASS 19   FAIL 0   NOT RUN 2   (NOT RUN is not a pass)` when run with the application's environment (`PYTHON=~/eol-venv/bin/python`).
 
 numpy is for the band levels in the microphone test; scipy only for the filter timing in part 3. The link itself needs nothing beyond Python.
 
