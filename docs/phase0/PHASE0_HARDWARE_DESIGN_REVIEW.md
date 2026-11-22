@@ -300,6 +300,8 @@ Alias margin without knowing the mic's internals: a 1-bit stream has a total pow
 
 Option A meets your 40 kHz bandwidth target and stays clean to 80 kHz, which is as far as the mic's ultrasonic curve is drawn [MIC s7].
 
+**As built in step 3 (2026-11-22):** both filters are in `dsp/`, designed by this rule with one change. The length is rounded up to 2 × K × ratio + 1 taps (289 instead of 259, 1089 instead of 1027), so the delay is a whole number of output samples and is removed exactly. The coefficients are stored with a name and a SHA-256 (4.7). Measured on the stored coefficients: passband flat within 0.001 dB to 40 kHz, stopband below -100 dB in both.
+
 ![Decimation filters](figures/decimation_filters.png)
 
 ![Spectra](figures/spectra.png)
@@ -331,14 +333,17 @@ Full scale: 94 dB SPL reads -26 dBFS [MIC s3], so 0 dBFS is 120 dB SPL at 1 kHz,
 
 ### 4.7 Decimation setting and filter timing, per board (D2, check e)
 
-Approved: the decimation ratio is a setting (16, giving 200 kHz, is the default; 32 gives 100 kHz). Every stored analysis records the filter version: a name that states clock, ratio and band edges, plus the SHA-256 of the coefficients. This is step 3 and 4 work.
+Approved: the decimation ratio is a setting (16, giving 200 kHz, is the default; 32 gives 100 kHz). Every stored analysis records the filter version: a name that states clock, ratio and band edges, plus the SHA-256 of the coefficients.
 
-Time to filter one 10 s capture, on one core. The three machines are kept apart; a figure from one says nothing certain about another.
+**Built 2026-11-22** (`dsp/`): `eol-pdm3200k-d16-p40k-s120k-a100-r1` (default) and `eol-pdm3200k-d32-p40k-s60k-a100-r1`. The coefficients are stored in `dsp/eol_dsp/filters.json` and checked against their SHA-256 at every load; the application never designs a filter, so the identity cannot drift with the scipy version. `python3 -m eol_dsp decimate --wav` writes the name and SHA-256 beside its output. Recording them with every analysis is step 4 and 6 work.
+
+Time to filter one 10 s capture, on one core. The three machines are kept apart; a figure from one says nothing certain about another. The first figures below were taken with the Phase 0 filters (259 and 1027 taps) by `analysis/filter_timing.py`; the production filters (289 and 1089 taps) are timed by `python3 -m eol_dsp timing`.
 
 | Machine | Divide by 16 (259 taps) | Divide by 32 (1027 taps) | Status |
 |---|---|---|---|
-| CM5 (Rev 1.0, 4 cores, Raspberry Pi OS trixie, Python 3.13.5, numpy 2.2.4, scipy 1.15.3) | 0.67 s median, 0.68 s worst | 1.21 s median, 1.21 s worst | measured 2026-11-22 over SSH, 5 runs each. **Meets the 1 s target for the default setting**; divide by 32 does not |
-| CM4 | not measured | not measured | **[NOT VERIFIED]**. Same command |
+| CM5 (Rev 1.0, 4 cores, Raspberry Pi OS trixie, Python 3.13.5, numpy 2.2.4, scipy 1.15.3), Phase 0 filters | 0.67 s median, 0.68 s worst | 1.21 s median, 1.21 s worst | measured 2026-11-22 over SSH, 5 runs each |
+| Same CM5, **production filters** | 0.73 s median, 0.73 s worst | 1.27 s median, 1.27 s worst | measured 2026-11-22. **Meets the 1 s target for the default setting**; divide by 32 does not. A real 40 s capture took 2.96 s |
+| CM4 | not measured | not measured | **[NOT VERIFIED]**. Run `python3 -m eol_dsp timing` |
 | This laptop (Apple arm64, 8 cores) | 0.31 s median, 0.37 s worst | 0.87 s median, 0.91 s worst | measured 2026-11-21. Not a target figure |
 
 Pass target on both boards: under 1 s for the default setting. If the CM4 misses it, the options are a shorter filter (a wider transition band is possible at 200 kHz), filtering in a second process while the capture is still arriving, or the Phase 0 fallback of filtering on the Pico.
@@ -1281,7 +1286,17 @@ Conclusion: **the limit of 32 bits is not too strict.** It fires when the signal
 - The PIO timing, the DMA ring, the clock change while running and the pad settings are from the SDK headers and the RP2350 datasheet, not from a working board. Expect fixes at first power-up.
 - No real microphone has been read. The simulated signal is square waves through a simple 1-bit modulator. It proves the plumbing, not the acoustics.
 - The band levels are relative figures. Nothing here measures sound pressure.
-- Not yet in step 3: the second-Pico logic analyser firmware, the tach sampler, and the decimation filter with selectable ratio.
+- Not yet in step 3: the second-Pico logic analyser firmware and the tach sampler. The decimation filter followed the same day (13.4).
+
+### 13.4 Step 3, second part: decimation filter
+
+**What was added, 2026-11-22:** `dsp/`, a new module (no existing file changed except the self-test, CI and READMEs). The filter design, the stored coefficients and their checks are described in 4.4, 4.7 and `dsp/README.md`.
+
+**Run on the laptop:** 17 filter tests pass; `scripts/selftest.sh` 16 passed, none failed, 2 not run. I broke the filter code six ways on purpose (delay left in; delay off by one; bits in the wrong order; SHA-256 not checked; ones and zeros swapped; one sample too few); the tests caught all six.
+
+**Run on the CM5, over SSH:** the 17 tests pass; the stored coefficients match a fresh design with the CM5's scipy 1.15.3; timing in 4.7. The keys-and-claps capture of 13.3 (40 s) became 8 000 000 samples at 200 kHz in 2.96 s. Per second, its levels follow the capture: quiet seconds at about -59 dBFS RMS, keys at -12 to -25 dBFS RMS with peaks of +0.2 to +2.6 dBFS, quiet again, then claps at -23 to -36 dBFS RMS. That agrees with the band levels and the peaks found in 13.3. The result is written as a 32-bit float WAV at 200 kHz with the filter's name and SHA-256 beside it.
+
+**Not verified:** the filter has been checked against textbook signals and for consistency on real captures, not against a reference instrument. Speed on a CM4.
 
 ## 14. Build plan
 
@@ -1289,7 +1304,7 @@ Conclusion: **the limit of 32 bits is not too strict.** It fires when the signal
 |---|---|---|
 | 1 | Phase 0 review (this document) | approved 2026-11-21; revision B adds the checks you asked for |
 | 2 | Pico firmware skeleton and CM5 receiver; link proof with synthetic data; simulator; first self-test | **done 2026-11-22**: bench items 16 to 19 passed on the Pico 2 W and CM5 (13.3) |
-| 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | capture, probe and the CM5 microphone test written; **a real microphone was read on 2026-11-22**: probe, quiet-room and sound checks pass; bench items 20, 37 and 46 done (13.3). Analyser firmware and filter not started. Bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
+| 3 | Mic clocks and capture; SELECT probe; second-Pico analyser firmware; filter with selectable ratio | capture, probe and the CM5 microphone test written; **a real microphone was read on 2026-11-22**: probe, quiet-room and sound checks pass; bench items 20, 37 and 46 done (13.3). **Decimation filter built and run on real captures** (13.4). Analyser firmware and tach sampler not started. Bench items 1 to 4, 8, 9, 11, 20, 21, 23, 24, 27, 36, 37 |
 | 4 | Acquisition service and recording storage on the CM5 | a simulated and a real capture are stored and verified by hash |
 | 5 | Database and Setup screens | Setup flow works in the browser at both screen sizes |
 | 6 | Analysis catalogue and ML | cross-validated results on synthetic data; bench items 38 to 42 |

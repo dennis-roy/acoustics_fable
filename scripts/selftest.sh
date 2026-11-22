@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-test for build-plan step 2 (firmware skeleton, receiver, link proof).
+# Self-test: firmware logic, link, microphone path and decimation filter.
 #
 #   scripts/selftest.sh              everything that needs no Pico (about 2 minutes)
 #   scripts/selftest.sh --long       the same, with 10-minute link runs instead of 10 s
@@ -13,7 +13,7 @@
 set -u
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-export PYTHONPATH="$ROOT/link:$ROOT/simulator"
+export PYTHONPATH="$ROOT/link:$ROOT/simulator:$ROOT/dsp"
 PY=${PYTHON:-python3}
 BUILD=$ROOT/build
 LOG=$BUILD/selftest.log
@@ -82,7 +82,7 @@ device_checks() { # device_checks "label"
   run "$1: microphone test, simulated microphone, 3 s" link mictest --seconds 3
 }
 
-echo "Self-test, step 2. Log: $LOG"
+echo "Self-test. Log: $LOG"
 echo
 
 # ---- 1. No hardware needed ----
@@ -91,6 +91,11 @@ run "Python is 3.11 or newer" "$PY" -c 'import sys; sys.exit(sys.version_info < 
 run "unit tests: frame format, synthetic data, mic checks" "$PY" -m unittest discover -s link/tests
 if ! "$PY" -c 'import numpy' 2> /dev/null; then
   notrun "band-level tests" "numpy is not installed here (on a Raspberry Pi: sudo apt install python3-numpy)"
+fi
+if "$PY" -c 'import numpy, scipy' 2> /dev/null; then
+  run "decimation filter: coefficients, response, timing, aliasing" "$PY" -m unittest discover -s dsp/tests
+else
+  notrun "decimation filter tests" "numpy or scipy is not installed (sudo apt install python3-numpy python3-scipy)"
 fi
 
 CORE_HOST=
