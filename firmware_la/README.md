@@ -2,7 +2,7 @@
 
 The bench has no oscilloscope (fact 6). A second Pico 2 watches the front-end Pico's wires and times them to about 7 to 13 ns. This is the firmware for it; `../bench/` is the CM5 tool that drives it. Why and what for: section 10.1 of `../docs/phase0/PHASE0_HARDWARE_DESIGN_REVIEW.md`.
 
-**State: written 2026-11-22, before the second Pico was connected. The core logic is tested on a PC; the firmware is compiled by CI; it has never run on a Pico.**
+**State: runs on a real Pico 2 (self-test against its own generator, 2026-11-23, below). Not yet connected to the front-end Pico.**
 
 ## What it can and cannot see
 
@@ -48,6 +48,24 @@ cmake -S firmware_la -B build/firmware_la -DPICO_BOARD=pico2 && cmake --build bu
 ```
 
 Flash the **second** Pico (hold BOOTSEL, plug in, copy `eol_la.uf2`). It then appears on the CM5 as `/dev/serial/by-id/usb-Zynith_EOL_logic_analyser_<serial>-if00`, separate from the front-end Pico.
+
+## First run on a real Pico 2 (2026-11-23)
+
+Flashed from the CM5 build (`eol_la.uf2`, commit 335b3ca), plugged into the development Mac, one jumper from GP15 (the generator) to GP0 (channel 0). The analyser measured its own generator:
+
+| Generator | Measured | Duty |
+|---|---|---|
+| 100 kHz, 30 % (high 450 cycles) | 100 000.00 Hz, every one of 50 000 periods; high 449 cycles | 29.933 % |
+| 100 kHz, 50 % (750) | high 749, low 751 | 49.933 % |
+| 500 kHz, 10 % (30) | high 29 | 9.667 % |
+| 1 MHz, 30 % (45) | 999 999.97 Hz; high 45, low 105 | 30.000 % |
+| 1 MHz, 50 % (75) | high 75, low 75 | 50.000 % |
+
+Burst at 150 MS/s of 1 MHz at 25 %: phases of 37 and 113 samples (37.5 and 112.5 expected).
+
+Periods and frequencies are exact. Where the true phase is an even number of cycles, the reading is one cycle short. That is expected here and not a bias of the method: a phase is always read as `2n + 5`, an odd number, and this generator runs from the analyser's own clock, so the edges never move against it and the reading cannot average out. A signal from another crystal (the front-end Pico's microphone clock) does move against it and averages out. **[NOT VERIFIED]** until the microphone clock is measured.
+
+The firmware caps the generator at 1 MHz (`la_core.c`), so 3.2 MHz could not be self-tested; it will be measured on the real microphone clock.
 
 ## Tests
 
