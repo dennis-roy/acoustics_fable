@@ -40,7 +40,7 @@ class Analyser:
         line, self._buf = self._buf.split(b"\n", 1)
         return line.decode(errors="replace").strip()
 
-    def command(self, text: str, timeout: float = 5.0) -> dict:
+    def command(self, text: str, timeout: float = 5.0, on_armed=None) -> dict:
         self._port.write((text + "\n").encode())
         deadline = time.monotonic() + timeout
         while True:
@@ -49,6 +49,10 @@ class Analyser:
                 reply = json.loads(line)
                 if "error" in reply:
                     raise AnalyserError(reply["error"])
+                if reply.get("armed") == "counts":
+                    if on_armed is not None:
+                        on_armed()
+                    continue
                 return reply
 
     def burst(self, samples: int, div: int, trigger: int | None, rising: bool = True, timeout_ms: int = 2000) -> tuple[dict, bytes]:
@@ -64,6 +68,67 @@ class Analyser:
 
 
 # ---- pulse widths ----
+
+@dataclass
+class CountsReport:
+    gates: int
+    gate_us: float
+    freq_hz: float
+    min_count: int
+    max_count: int
+    ref_freq_hz: float | None
+    change_ms: float | None
+    after_freq_hz: float | None
+    after_gates: int
+    after_min: int
+    after_max: int
+    problems: list[str]
+
+
+def counts_report(j: dict, expected_gates: int) -> CountsReport:
+    if j.get("mode") != "counts":
+        raise AnalyserError("counting mode requires analyser firmware 0.2.0 or newer")
+    integer_fields = ("clk_hz", "gate_cycles", "gates", "sum", "min", "max", "zero_gates",
+                      "ref_n", "ref_sum", "change_at", "after_n", "after_sum", "after_min", "after_max")
+    if any(type(j.get(key)) is not int for key in integer_fields):
+        raise AnalyserError("incomplete or malformed counting report")
+    if any(type(j.get(key)) is not bool for key in ("overrun", "timed_out")):
+        raise AnalyserError("invalid counting status flags")
+    if j["clk_hz"] <= 0 or j["gate_cycles"] != 1500:
+        raise AnalyserError("invalid counting clock or gate length")
+    problems = []
+    if j["overrun"]:
+        problems.append("DMA overrun, invalid count or PIO FIFO stall: measurement invalid")
+    if j["timed_out"]:
+        problems.append("capture timed out before all gates arrived")
+    if j["gates"] != expected_gates:
+        problems.append(f"incomplete capture: {j['gates']} of {expected_gates} gates")
+    if not j["gates"] or not j["sum"]:
+        problems.append("no signal")
+    if j["zero_gates"]:
+        problems.append("one or more gates had no edges: clock stopped or input too slow")
+    if not 0 <= j["min"] <= j["max"] <= 187:
+        problems.append("count outside the PIO sampling limit")
+    for count_key, sum_key, lo, hi in (("gates", "sum", j["min"], j["max"]),
+                                      ("ref_n", "ref_sum", j["min"], j["max"]),
+                                      ("after_n", "after_sum", j["after_min"], j["after_max"])):
+        if not 0 <= j[count_key] <= j["gates"] or not 0 <= lo <= hi <= 187 or not lo * j[count_key] <= j[sum_key] <= hi * j[count_key]:
+            problems.append(f"inconsistent {count_key} statistics")
+    if not 0 <= j["zero_gates"] <= j["gates"] or j["ref_n"] != min(64, j["gates"]):
+        problems.append("inconsistent reference or zero-gate count")
+    change = j["change_at"]
+    if change != -1 and not 64 <= change < j["gates"]:
+        problems.append("invalid frequency change index")
+    expected_after = max(0, j["gates"] - (change + 16 if change >= 0 else 64))
+    if j["after_n"] != expected_after:
+        problems.append("inconsistent post-settle gate count")
+    scale = j["clk_hz"] / j["gate_cycles"]
+    return CountsReport(
+        j["gates"], 1e6 / scale, scale * j["sum"] / j["gates"] if j["gates"] else 0,
+        j["min"], j["max"], scale * j["ref_sum"] / j["ref_n"] if j["ref_n"] else None,
+        j["change_at"] / scale * 1000 if j["change_at"] >= 0 else None,
+        scale * j["after_sum"] / j["after_n"] if j["after_n"] else None,
+        j["after_n"], j["after_min"], j["after_max"], problems)
 
 @dataclass
 class WidthsReport:

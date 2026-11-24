@@ -35,3 +35,51 @@ low_exit:
 .wrap_target
     in pins, 8
 .wrap
+
+; Rising edges per fixed gate: 373 four-cycle samples + 8 boundary cycles.
+; Both level paths take exactly the same time. X is a 32-bit down counter.
+; OSR holds 372, reloaded into Y every gate. Preserve the previous level
+; across boundaries, so an edge during PUSH is observed on the next sample.
+; Maximum gap between pin samples is 12 cycles (80 ns at 150 MHz).
+; Only the first edge uses WAIT. A stopped input subsequently produces zero counts.
+; A blocking PUSH preserves data; the host rejects any capture with RXSTALL.
+.program la_counts
+    pull block
+    mov y, osr
+    mov x, ~null
+    wait 0 pin 0
+    wait 1 pin 0
+    jmp count_low
+count_low:
+    jmp pin count_rise
+    nop
+    jmp y-- count_low [1]
+    jmp finish_low
+count_rise:
+    jmp x-- rise_counted
+rise_counted:
+    jmp y-- count_high [1]
+    jmp finish_high
+count_high:
+    jmp pin still_high
+    nop
+    jmp y-- count_low [1]
+    jmp finish_low
+still_high:
+    nop
+    jmp y-- count_high [1]
+    jmp finish_high
+finish_low:
+    mov isr, ~x
+    push block
+    mov x, ~null
+    mov y, osr
+    nop [1]
+    jmp count_low
+finish_high:
+    mov isr, ~x
+    push block
+    mov x, ~null
+    mov y, osr
+    nop [1]
+    jmp count_high

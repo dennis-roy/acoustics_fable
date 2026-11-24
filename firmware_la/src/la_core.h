@@ -7,7 +7,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define LA_FW_VERSION "0.1.0"
+#define LA_FW_VERSION "0.2.0"
+#define LA_COUNT_SAMPLES 373u
+#define LA_COUNT_MAX ((LA_COUNT_SAMPLES + 1u) / 2u)
+#define LA_GATE_CYCLES (4u * LA_COUNT_SAMPLES + 8u)
 #define LA_CHANNELS 8          /* inputs GP0..GP7 */
 #define LA_BURST_MAX 262144u   /* samples (one byte each: bit n = channel n) */
 #define LA_REF_PERIODS 64u     /* periods averaged as the reference before a change is looked for */
@@ -19,7 +22,19 @@
    count the PIO pushes. Both phases have the same overhead, so the duty cycle is not biased. */
 #define LA_PHASE_OVERHEAD 5u
 
-typedef enum { LA_ID, LA_LEVELS, LA_WIDTHS, LA_BURST, LA_GEN, LA_GEN_OFF } la_kind_t;
+typedef enum { LA_ID, LA_LEVELS, LA_WIDTHS, LA_BURST, LA_GEN, LA_GEN_OFF, LA_COUNTS } la_kind_t;
+
+typedef struct {
+    uint32_t gates, min_count, max_count, zero_gates, ref_n, after_n;
+    uint32_t after_min, after_max;
+    uint32_t candidate_at, candidate_count, candidate_n;
+    uint64_t sum, ref_sum, after_sum;
+    int32_t change_at;
+} la_counts_t;
+
+void la_counts_init(la_counts_t *s);
+bool la_counts_add(la_counts_t *s, uint32_t count);
+int la_counts_json(const la_counts_t *s, uint32_t clk_hz, bool overrun, bool timed_out, char *buf, size_t n);
 
 typedef struct {
     la_kind_t kind;

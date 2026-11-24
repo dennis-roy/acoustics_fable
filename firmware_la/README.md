@@ -2,7 +2,64 @@
 
 The bench has no oscilloscope (fact 6). A second Pico 2 watches the front-end Pico's wires and times them to about 7 to 13 ns. This is the firmware for it; `../bench/` is the CM5 tool that drives it. Why and what for: section 10.1 of `../docs/phase0/PHASE0_HARDWARE_DESIGN_REVIEW.md`.
 
-**State: runs on a real Pico 2 (self-test against its own generator, 2026-11-23, below). Not yet connected to the front-end Pico.**
+**Bench state, 2026-11-24:** firmware 0.1.0 is connected to the front-end Pico. Both microphone configurations (analyser GP1 disconnected and connected) passed captures. With GP1 connected a burst saw 2796 clock and 964 data transitions. Counting firmware 0.2.0 is under host verification and has not been flashed.
+
+## Counting mode (0.2.0, physical verification pending)
+
+`counts <channel 0-7> <gates 1-6000000> <timeout ms 1-600000>` returns a JSON summary.
+Each gate is exactly 1500 analyser system cycles, or 10 us at 150 MHz. The PIO
+executes 373 four-cycle sample paths plus eight boundary cycles. The high and low
+paths have identical timing. Previous input level is preserved over the boundary,
+so rising edges during counter publication are counted on the next sample.
+The longest interval between input samples is 12 cycles (80 ns at 150 MHz).
+Both signal phases must exceed this interval for reliable counting. This covers
+the intended 50 percent 100 kHz to 3.2 MHz bench clocks, with hardware confirmation pending.
+
+The 32-bit X counter counts down from all ones. It cannot overflow in 373 sample
+iterations. At most 187 rising edges fit into 373 binary samples. Firmware rejects
+counts above 187. DMA has a finite total transfer
+count and writes into the existing 8192-word ring. Consumer lag beyond 8128 words
+or PIO RXSTALL marks the measurement invalid. A blocking PUSH prevents silently
+dropped words. A stopped clock produces zero-count gates and is rejected by the
+host. An input with no first rising edge times out. The command deadline covers
+waiting for the first edge and the complete capture.
+
+The first 64 gates form the reference. The first subsequent gate differing by
+more than one eighth identifies a frequency change. The next 16 gates are excluded
+from the post-change mean. Three consecutive changed gates agreeing within one
+edge confirm a switch, backdated to the first candidate. A transient gate is
+discarded as a switch candidate when the reference rate resumes. Change time is the start of the changed gate, relative
+to startup, with gate quantization and up to 12-cycle input polling uncertainty.
+The mode does not measure duty or minimum pulse width. A chained one-word DMA
+clears the PIO state machine's enable bit immediately after the requested final
+word, preventing a post-capture FIFO stall while the CPU processes the last words.
+Firmware sends an armed acknowledgement before the host starts the front-end
+stream. The host consumes this acknowledgement before the final result.
+
+The clock command captures 1020000 gates and requires at least 1000000 settled
+gates with every settled count between 31 and 33, as well as the mean frequency
+limit. It reports the settled count range independently of the startup range.
+
+On the CM5, with the acquisition services stopped:
+
+```sh
+PYTHONPATH=bench:link python3 -m eol_bench clock
+PYTHONPATH=bench:link python3 -m eol_bench wakeup
+# Running generator input, one million gates (10 seconds):
+PYTHONPATH=bench:link python3 -m eol_bench counts --gates 1000000
+# Legacy short width measurement, still capable of overrunning at high rate:
+PYTHONPATH=bench:link python3 -m eol_bench clock --widths --periods 128 --skip 300000
+```
+
+`clock` and `wakeup` require 0.2.0 by default. `--widths` retains the original
+measurement mode. Burst and generator commands remain compatible with 0.1.0.
+Counting results report the crystal-relative mean, min/max count, reference and
+post-switch rates, and invalid/incomplete capture flags.
+
+The earlier 0.1.0 width-mode bench run overran on the microphone clock. The
+new counting mode must still pass the M2 generator, 10-second clock and five-run
+wake-up checks after owner-approved flashing. Host simulation and compilation
+do not establish those physical results.
 
 ## What it can and cannot see
 

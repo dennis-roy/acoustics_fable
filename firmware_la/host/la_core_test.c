@@ -114,6 +114,39 @@ static void test_pwm(void)
     CHECK(div == 255 && wrap == 65535 && f > 1.0);
 }
 
+static void test_counts(void)
+{
+    la_cmd_t c;
+    CHECK(!la_parse("counts 0 1000000 12000", &c) && c.kind == LA_COUNTS && c.count == 1000000);
+    CHECK(la_parse("counts 8 1 10", &c) != NULL);
+    CHECK(la_parse("counts 0 0 10", &c) != NULL);
+    CHECK(la_parse("counts 0 6000001 10", &c) != NULL);
+    la_counts_t s;
+    la_counts_init(&s);
+    for (unsigned i = 0; i < 10000; i++) CHECK(la_counts_add(&s, 20));
+    for (unsigned i = 0; i < 100; i++) CHECK(la_counts_add(&s, 32));
+    CHECK(s.gates == 10100 && s.change_at == 10000);
+    CHECK(s.min_count == 20 && s.max_count == 32);
+    CHECK(s.ref_sum == 20 * LA_REF_PERIODS);
+    CHECK(s.after_n > 0 && s.after_sum == 32 * s.after_n);
+    CHECK(!la_counts_add(&s, LA_COUNT_MAX + 1));
+    CHECK(s.after_min == 32 && s.after_max == 32);
+    char out[1024];
+    CHECK(la_counts_json(&s, 150000000, false, false, out, sizeof out) < (int)sizeof out);
+    CHECK(strstr(out, "\"gate_cycles\":1500") != NULL);
+    CHECK(strstr(out, "\"change_at\":10000") != NULL);
+    la_counts_init(&s);
+    for (unsigned i = 0; i < 100; i++) CHECK(la_counts_add(&s, 0));
+    CHECK(s.change_at == -1 && s.zero_gates == 100);
+    la_counts_init(&s);
+    for (unsigned i = 0; i < 10000; i++) la_counts_add(&s, 20);
+    la_counts_add(&s, 16); /* transient before the real startup switch */
+    for (unsigned i = 0; i < 59; i++) la_counts_add(&s, 20);
+    for (unsigned i = 0; i < 100; i++) la_counts_add(&s, 32);
+    CHECK(s.change_at == 10060);
+    CHECK(s.after_min == 32 && s.after_max == 32);
+}
+
 int main(void)
 {
     test_parse();
@@ -121,6 +154,7 @@ int main(void)
     test_widths_glitch_and_steady();
     test_base64();
     test_pwm();
+    test_counts();
     printf(failures ? "%d FAILED\n" : "all la_core tests passed\n", failures);
     return failures != 0;
 }

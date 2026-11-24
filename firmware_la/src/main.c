@@ -25,6 +25,7 @@ static uint32_t buf[LA_BURST_MAX / 4] __attribute__((aligned(1u << RING_BITS)));
 static PIO pio = pio0;
 static const uint sm = 0;
 static uint dma_ch;
+static uint stop_dma_ch;
 static volatile uint32_t wraps; /* times the widths ring has wrapped */
 static int gen_pin = -1;
 static char line[96], out[1024];
@@ -43,11 +44,73 @@ static void stop_capture(void)
     dma_channel_set_irq0_enabled(dma_ch, false);
     hw_clear_bits(&dma_hw->ch[dma_ch].al1_ctrl, DMA_CH0_CTRL_TRIG_EN_BITS); /* RP2350-E5 */
     dma_channel_abort(dma_ch);
+    dma_channel_abort(stop_dma_ch);
     pio_clear_instruction_memory(pio);
     gpio_put(LED, 0);
 }
 
 static void reply(const char *s) { printf("%s\n", s); }
+
+static void cmd_counts(const la_cmd_t *c)
+{
+    uint offset = pio_add_program(pio, &la_counts_program);
+    pio_sm_config cfg = la_counts_program_get_default_config(offset);
+    sm_config_set_in_pins(&cfg, c->ch);
+    sm_config_set_jmp_pin(&cfg, c->ch);
+    /* Keep TX available for the gate reload value. */
+    pio_sm_init(pio, sm, offset, &cfg);
+    pio_sm_put(pio, sm, LA_COUNT_SAMPLES - 1u);
+    uint32_t stall_mask = 1u << (PIO_FDEBUG_RXSTALL_LSB + sm);
+    pio->fdebug = stall_mask;
+
+    dma_channel_config d = dma_channel_get_default_config(dma_ch);
+    channel_config_set_transfer_data_size(&d, DMA_SIZE_32);
+    channel_config_set_read_increment(&d, false);
+    channel_config_set_write_increment(&d, true);
+    channel_config_set_ring(&d, true, RING_BITS);
+    channel_config_set_dreq(&d, pio_get_dreq(pio, sm, false));
+    /* The completion channel disables this PIO block's sole SM immediately after
+       the last recorded gate. CPU scheduling cannot cause a spurious tail stall.
+       This analyser owns pio0 exclusively (stop_capture clears its instructions). */
+    uint32_t disable_mask = 1u << sm;
+    dma_channel_config stop = dma_channel_get_default_config(stop_dma_ch);
+    channel_config_set_transfer_data_size(&stop, DMA_SIZE_32);
+    channel_config_set_read_increment(&stop, false);
+    channel_config_set_write_increment(&stop, false);
+    dma_channel_configure(stop_dma_ch, &stop, hw_clear_alias(&pio->ctrl), &disable_mask, 1, false);
+    channel_config_set_chain_to(&d, stop_dma_ch);
+    /* Finite transfer count gives a monotonic producer index, without wrap IRQ races. */
+    dma_channel_configure(dma_ch, &d, buf, &pio->rxf[sm], c->count, true);
+    la_counts_t s;
+    la_counts_init(&s);
+    bool overrun = false, timed_out = false;
+    absolute_time_t deadline = make_timeout_time_ms(c->timeout_ms);
+    gpio_put(LED, 1);
+    pio_sm_set_enabled(pio, sm, true);
+    reply("{\"armed\":\"counts\"}");
+    while (s.gates < c->count) {
+        uint32_t produced = c->count - dma_hw->ch[dma_ch].transfer_count;
+        if (produced - s.gates > RING_WORDS - 64u || (pio->fdebug & stall_mask)) {
+            overrun = true;
+            break;
+        }
+        /* Check lag again for every word, including while processing a backlog. */
+        if (produced > s.gates && !la_counts_add(&s, buf[s.gates % RING_WORDS])) {
+            overrun = true;
+            break;
+        }
+        if (time_reached(deadline) && s.gates < c->count) {
+            timed_out = true;
+            break;
+        }
+    }
+    /* Freeze before checking for a late stall. */
+    pio_sm_set_enabled(pio, sm, false);
+    overrun |= (pio->fdebug & stall_mask) != 0;
+    stop_capture();
+    la_counts_json(&s, clock_get_hz(clk_sys), overrun, timed_out, out, sizeof out);
+    reply(out);
+}
 
 static void cmd_widths(const la_cmd_t *c)
 {
@@ -196,6 +259,7 @@ int main(void)
         gpio_disable_pulls(i);
     }
     dma_ch = (uint)dma_claim_unused_channel(true);
+    stop_dma_ch = (uint)dma_claim_unused_channel(true);
     irq_set_exclusive_handler(DMA_IRQ_0, dma_irq);
     irq_set_enabled(DMA_IRQ_0, true);
 
@@ -228,6 +292,7 @@ int main(void)
             reply(out);
             break;
         case LA_WIDTHS: cmd_widths(&c); break;
+        case LA_COUNTS: cmd_counts(&c); break;
         case LA_BURST: cmd_burst(&c); break;
         case LA_GEN:
         case LA_GEN_OFF: cmd_gen(&c); break;

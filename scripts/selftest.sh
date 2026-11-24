@@ -112,6 +112,7 @@ echo
 run "Python is 3.11 or newer" "$PY" -c 'import sys; sys.exit(sys.version_info < (3, 11))'
 run "unit tests: frame format, synthetic data, mic checks" "$PY" -m unittest discover -s link/tests
 run "bench tool for the logic analyser (fake analyser)" "$PY" -m unittest discover -s bench/tests
+run "logic analyser counting PIO cycle model" "$PY" firmware_la/host/test_count_pio.py
 if ! "$PY" -c 'import numpy' 2> /dev/null; then
   notrun "band-level tests" "numpy is not installed here (on a Raspberry Pi: sudo apt install python3-numpy)"
 fi

@@ -3,10 +3,53 @@
 import base64
 import json
 import unittest
+from unittest.mock import patch
 
-from eol_bench.la import Analyser, AnalyserError, data_delay, edges, widths_report
+from eol_bench.la import Analyser, AnalyserError, counts_report, data_delay, edges, widths_report
 
 CLK = 150_000_000
+
+
+class CountsTests(unittest.TestCase):
+    def test_clock_cli_requires_ten_settled_seconds_and_bounded_counts(self):
+        from eol_bench.__main__ import main
+        import io
+        gates = 1020000
+        report = dict(mode="counts", clk_hz=CLK, gate_cycles=1500, gates=gates,
+                      sum=32 * gates, min=32, max=32, zero_gates=0, ref_n=64, ref_sum=2048,
+                      change_at=-1, after_n=gates - 64, after_sum=(gates - 64) * 32,
+                      after_min=32, after_max=32, overrun=False, timed_out=False)
+        cases = [(report, 0), ({**report, "min": 15, "max": 49, "after_min": 15, "after_max": 49}, 1),
+                 ({**report, "gates": 1000000, "after_n": 999936}, 1)]
+        for reply, expected in cases:
+            with patch("sys.argv", ["eol_bench", "--port", "fake", "clock"]), \
+                 patch("eol_bench.__main__.Port"), \
+                 patch("eol_bench.__main__._measure_during_stream", return_value=reply), \
+                 patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(main(), expected)
+
+    def test_frequency_and_switch(self):
+        j = dict(mode="counts", clk_hz=CLK, gate_cycles=1500, gates=15000,
+                 sum=360000, min=20, max=32, zero_gates=0, ref_n=64, ref_sum=1280,
+                 change_at=10000, after_n=4984, after_sum=4984 * 32, after_min=32, after_max=32,
+                 overrun=False, timed_out=False)
+        r = counts_report(j, expected_gates=15000)
+        self.assertEqual(r.problems, [])
+        self.assertEqual(r.ref_freq_hz, 2e6)
+        self.assertEqual(r.after_freq_hz, 3.2e6)
+        self.assertEqual(r.change_ms, 100)
+        self.assertTrue(counts_report({**j, "overrun": True}, 15000).problems)
+        self.assertTrue(counts_report({**j, "gates": 14999}, 15000).problems)
+        self.assertTrue(counts_report({**j, "zero_gates": 1}, 15000).problems)
+        self.assertTrue(counts_report({**j, "timed_out": True}, 15000).problems)
+
+    def test_old_firmware_and_empty_capture(self):
+        with self.assertRaisesRegex(AnalyserError, "counting"):
+            counts_report({"mode": "widths"}, 10)
+        j = dict(mode="counts", clk_hz=CLK, gate_cycles=1500, gates=0, sum=0,
+                 min=0, max=0, zero_gates=0, ref_n=0, ref_sum=0,
+                 change_at=-1, after_n=0, after_sum=0, after_min=0, after_max=0, overrun=False, timed_out=True)
+        self.assertTrue(counts_report(j, 10).problems)
 
 
 class FakePort:
@@ -79,6 +122,30 @@ class BurstTests(unittest.TestCase):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_counting_armed_response_is_not_the_result(self):
+        from eol_bench.__main__ import _measure_during_stream
+        la = Analyser(FakePort(['{"armed":"counts"}\n{"mode":"counts","gates":100}\n']))
+        with patch("eol_bench.__main__._start_mic_stream") as start:
+            result = _measure_during_stream(la, "counts 0 100 1000", False, 1)
+        self.assertEqual(result["gates"], 100)
+        start.assert_called_once_with(1)
+
+    def test_rejected_count_command_does_not_start_microphone(self):
+        from eol_bench.__main__ import _measure_during_stream
+        for exception in (AnalyserError("unknown command"), OSError("USB disconnected")):
+            with patch.object(Analyser, "command", side_effect=exception):
+                with patch("eol_bench.__main__._start_mic_stream") as start:
+                    with self.assertRaises(AnalyserError):
+                        _measure_during_stream(Analyser(FakePort([])), "counts 0 100 1000", False, 1)
+                    start.assert_not_called()
+
+    def test_missing_armed_ack_does_not_start_microphone(self):
+        from eol_bench.__main__ import _measure_during_stream
+        with patch("eol_bench.__main__._start_mic_stream") as start:
+            with self.assertRaisesRegex(AnalyserError, "without confirming armed"):
+                _measure_during_stream(Analyser(FakePort(['{"mode":"counts"}\n'])), "counts 0 100 1000", False, 1)
+            start.assert_not_called()
+
     def test_command_and_errors(self):
         port = FakePort(['noise from boot\n{"fw":"eol-la 0.1.0","clk_hz":150000000}\n', '{"error":"unknown command"}\n'])
         la = Analyser(port)

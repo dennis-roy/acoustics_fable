@@ -35,6 +35,14 @@ const char *la_parse(const char *line, la_cmd_t *c)
     if (!word(&p, w, sizeof w)) return "empty command";
     if (!strcmp(w, "id")) { c->kind = LA_ID; return NULL; }
     if (!strcmp(w, "levels")) { c->kind = LA_LEVELS; return NULL; }
+    if (!strcmp(w, "counts")) {
+        c->kind = LA_COUNTS;
+        if (!number(&p, 0, LA_CHANNELS - 1, &c->ch) ||
+            !number(&p, 1, 6000000u, &c->count) ||
+            !number(&p, 1, 600000u, &c->timeout_ms))
+            return "counts <channel 0-7> <gates 1-6000000> <timeout ms 1-600000>";
+        return NULL;
+    }
     if (!strcmp(w, "widths")) {
         c->kind = LA_WIDTHS;
         if (!number(&p, 0, LA_CHANNELS - 1, &c->ch)) return "widths <channel 0-7> <periods 1-50000000> <timeout ms 1-600000> [skip periods]";
@@ -70,7 +78,71 @@ const char *la_parse(const char *line, la_cmd_t *c)
         if (!number(&p, 1, 99, &c->duty)) return "gen: duty must be 1 to 99 %";
         return NULL;
     }
-    return "unknown command (id, levels, widths, burst, gen)";
+    return "unknown command (id, levels, widths, burst, gen, counts)";
+}
+
+void la_counts_init(la_counts_t *s)
+{
+    memset(s, 0, sizeof *s);
+    s->min_count = UINT32_MAX;
+    s->after_min = UINT32_MAX;
+    s->change_at = -1;
+}
+
+bool la_counts_add(la_counts_t *s, uint32_t count)
+{
+    if (count > LA_COUNT_MAX) return false;
+    if (count < s->min_count) s->min_count = count;
+    if (count > s->max_count) s->max_count = count;
+    s->sum += count;
+    if (!count) s->zero_gates++;
+    if (s->ref_n < LA_REF_PERIODS) {
+        s->ref_sum += count;
+        s->ref_n++;
+    } else if (s->change_at < 0 && s->ref_sum) {
+        uint64_t v = (uint64_t)count * s->ref_n;
+        uint64_t diff = v > s->ref_sum ? v - s->ref_sum : s->ref_sum - v;
+        if (diff * 8u > s->ref_sum) {
+            uint32_t delta = count > s->candidate_count ? count - s->candidate_count : s->candidate_count - count;
+            if (s->candidate_n && delta <= 1u) s->candidate_n++;
+            else {
+                s->candidate_at = s->gates;
+                s->candidate_count = count;
+                s->candidate_n = 1;
+            }
+            /* A single noisy gate must not permanently misdate the switch. */
+            if (s->candidate_n == 3u) {
+                s->change_at = (int32_t)s->candidate_at;
+                s->after_sum = 0;
+                s->after_n = 0;
+                s->after_min = UINT32_MAX;
+                s->after_max = 0;
+            }
+        } else s->candidate_n = 0;
+    }
+    if (s->gates >= LA_REF_PERIODS &&
+        (s->change_at < 0 || s->gates - (uint32_t)s->change_at >= LA_AFTER_SKIP)) {
+        s->after_sum += count;
+        s->after_n++;
+        if (count < s->after_min) s->after_min = count;
+        if (count > s->after_max) s->after_max = count;
+    }
+    s->gates++;
+    return true;
+}
+
+int la_counts_json(const la_counts_t *s, uint32_t clk_hz, bool overrun, bool timed_out, char *buf, size_t n)
+{
+    return snprintf(buf, n,
+        "{\"mode\":\"counts\",\"clk_hz\":%lu,\"gate_cycles\":%u,\"gates\":%lu,"
+        "\"sum\":%llu,\"min\":%lu,\"max\":%lu,\"zero_gates\":%lu,\"ref_n\":%lu,\"ref_sum\":%llu,"
+        "\"change_at\":%ld,\"after_n\":%lu,\"after_sum\":%llu,\"after_min\":%lu,\"after_max\":%lu,\"overrun\":%s,\"timed_out\":%s}",
+        (unsigned long)clk_hz, LA_GATE_CYCLES, (unsigned long)s->gates,
+        (unsigned long long)s->sum, (unsigned long)(s->gates ? s->min_count : 0),
+        (unsigned long)s->max_count, (unsigned long)s->zero_gates, (unsigned long)s->ref_n,
+        (unsigned long long)s->ref_sum, (long)s->change_at, (unsigned long)s->after_n,
+        (unsigned long long)s->after_sum, (unsigned long)(s->after_n ? s->after_min : 0),
+        (unsigned long)s->after_max, overrun ? "true" : "false", timed_out ? "true" : "false");
 }
 
 void la_widths_init(la_widths_t *w)
